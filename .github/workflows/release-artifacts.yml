@@ -44,6 +44,7 @@ jobs:
     outputs:
       distros: ${{ steps.set-distros.outputs.distros }}
 
+### Deactivate pipeline : not required for Tchap Synapse ###
 #  # now build the packages with a matrix build.
 #  build-debs:
 #    needs: get-distros
@@ -102,8 +103,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+### Deactivate pipeline : not required for Tchap Synapse ###
 #        os: [ubuntu-20.04, macos-11]
         os: [ubuntu-20.04]
+### Deactivate pipeline : not required for Tchap Synapse ###
 #        arch: [x86_64, aarch64]
         arch: [x86_64]
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
@@ -190,6 +193,7 @@ jobs:
     name: "Attach assets to release"
     if: ${{ !failure() && !cancelled() && startsWith(github.ref, 'refs/tags/') }}
     needs:
+### Deactivate pipeline : not required for Tchap Synapse ###
 #      - build-debs
       - build-wheels
       - build-sdist
@@ -197,6 +201,7 @@ jobs:
     steps:
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@v4
+### Deactivate pipeline : not required for Tchap Synapse ###
 #      - name: Build a tarball for the debs
 #        run: tar -cvJf debs.tar.xz debs
       - name: Attach to release
@@ -207,6 +212,7 @@ jobs:
           files: |
             Sdist/*
             Wheel/*
+### Deactivate pipeline : not required for Tchap Synapse ###
 #            debs.tar.xz
           # if it's not already published, keep the release as a draft.
           draft: true
