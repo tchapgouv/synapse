@@ -322,6 +322,7 @@ def _parse_oidc_config_dict(
         user_mapping_provider_config=user_mapping_provider_config,
         attribute_requirements=attribute_requirements,
         enable_registration=oidc_config.get("enable_registration", True),
+        extra_grant_values=oidc_config.get("extra_grant_values", {}),
     )
 
 
@@ -424,3 +425,5 @@ class OidcProviderConfig:
 
     # Whether automatic registrations are enabled in the ODIC flow. Defaults to True
     enable_registration: bool
+
+    extra_grant_values: Mapping[str, str]
