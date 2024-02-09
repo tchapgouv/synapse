@@ -8,10 +8,10 @@ on:
   # building wheels on macOS & ARM.
   pull_request:
   push:
-    branches: ["develop", "release-*"]
+    branches: ["develop_tchap"]
 
     # we do the full build on tags.
-    tags: ["v*"]
+    tags: ["tchap-v*"]
   merge_group:
   workflow_dispatch:
 
