@@ -8,10 +8,11 @@ on:
   # building wheels on macOS & ARM.
   pull_request:
   push:
-    branches: ["develop", "release-*"]
+    branches: ["develop_tchap", "tchap"]
 
-    # we do the full build on tags.
-    tags: ["v*"]
+  # we do the full build on releases.
+  release:
+    types: [published]
   merge_group:
   workflow_dispatch:
 
@@ -23,96 +24,100 @@ permissions:
   contents: write
 
 jobs:
-  get-distros:
-    name: "Calculate list of debian distros"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - id: set-distros
-        run: |
-          # if we're running from a tag, get the full list of distros; otherwise just use debian:sid
-          # NOTE: inside the actual Dockerfile-dhvirtualenv, the image name is expanded into its full image path
-          dists='["debian:sid"]'
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-              dists=$(scripts-dev/build_debian_packages.py --show-dists-json)
-          fi
-          echo "distros=$dists" >> "$GITHUB_OUTPUT"
-    # map the step outputs to job outputs
-    outputs:
-      distros: ${{ steps.set-distros.outputs.distros }}
+  ### Deactivate debs pipeline : not required for Tchap Synapse ###
+
+  # get-distros:
+  #   name: "Calculate list of debian distros"
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.x'
+  #     - id: set-distros
+  #       run: |
+  #         # if we're running from a tag, get the full list of distros; otherwise just use debian:sid
+  #         # NOTE: inside the actual Dockerfile-dhvirtualenv, the image name is expanded into its full image path
+  #         dists='["debian:sid"]'
+  #         if [[ $GITHUB_REF == refs/tags/* ]]; then
+  #             dists=$(scripts-dev/build_debian_packages.py --show-dists-json)
+  #         fi
+  #         echo "distros=$dists" >> "$GITHUB_OUTPUT"
+  #   # map the step outputs to job outputs
+  #   outputs:
+  #     distros: ${{ steps.set-distros.outputs.distros }}
 
   # now build the packages with a matrix build.
-  build-debs:
-    needs: get-distros
-    name: "Build .deb packages"
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        distro: ${{ fromJson(needs.get-distros.outputs.distros) }}
+  # build-debs:
+  #   needs: get-distros
+  #   name: "Build .deb packages"
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     matrix:
+  #       distro: ${{ fromJson(needs.get-distros.outputs.distros) }}
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          path: src
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         path: src
 
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          install: true
+  #     - name: Set up Docker Buildx
+  #       id: buildx
+  #       uses: docker/setup-buildx-action@v3
+  #       with:
+  #         install: true
 
-      - name: Set up docker layer caching
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+  #     - name: Set up docker layer caching
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: /tmp/.buildx-cache
+  #         key: ${{ runner.os }}-buildx-${{ github.sha }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-buildx-
 
-      - name: Set up python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
+  #     - name: Set up python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.x'
 
-      - name: Build the packages
-        # see https://github.com/docker/build-push-action/issues/252
-        # for the cache magic here
-        run: |
-          ./src/scripts-dev/build_debian_packages.py \
-            --docker-build-arg=--cache-from=type=local,src=/tmp/.buildx-cache \
-            --docker-build-arg=--cache-to=type=local,mode=max,dest=/tmp/.buildx-cache-new \
-            --docker-build-arg=--progress=plain \
-            --docker-build-arg=--load \
-            "${{ matrix.distro }}"
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+  #     - name: Build the packages
+  #       # see https://github.com/docker/build-push-action/issues/252
+  #       # for the cache magic here
+  #       run: |
+  #         ./src/scripts-dev/build_debian_packages.py \
+  #           --docker-build-arg=--cache-from=type=local,src=/tmp/.buildx-cache \
+  #           --docker-build-arg=--cache-to=type=local,mode=max,dest=/tmp/.buildx-cache-new \
+  #           --docker-build-arg=--progress=plain \
+  #           --docker-build-arg=--load \
+  #           "${{ matrix.distro }}"
+  #         rm -rf /tmp/.buildx-cache
+  #         mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Artifact name
-        id: artifact-name
-        # We can't have colons in the upload name of the artifact, so we convert
-        # e.g. `debian:sid` to `sid`.
-        env:
-          DISTRO: ${{ matrix.distro }}
-        run: |
-          echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
+  #     - name: Artifact name
+  #       id: artifact-name
+  #       # We can't have colons in the upload name of the artifact, so we convert
+  #       # e.g. `debian:sid` to `sid`.
+  #       env:
+  #         DISTRO: ${{ matrix.distro }}
+  #       run: |
+  #         echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload debs as artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
-          path: debs/*
+  #     - name: Upload debs as artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
+  #         path: debs/*
 
   build-wheels:
     name: Build wheels on ${{ matrix.os }} for ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-13]
-        arch: [x86_64, aarch64]
+        ### Deactivate macos-13 pipeline : not required for Tchap Synapse ###
+        os: [ubuntu-22.04]
+        ### Deactivate aarch64 pipeline : not required for Tchap Synapse ###
+        arch: [x86_64]
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
         is_pr:
@@ -158,6 +163,8 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
+          ### only build python 3.9 wheels : the rest is not required for Tchap Synapse ###
+          CIBW_BUILD: cp39-*
           # Skip testing for platforms which various libraries don't have wheels
           # for, and so need extra build deps.
           CIBW_TEST_SKIP: pp3*-* *i686* *musl*
@@ -197,20 +204,20 @@ jobs:
     name: "Attach assets to release"
     if: ${{ !failure() && !cancelled() && startsWith(github.ref, 'refs/tags/') }}
     needs:
-      - build-debs
+      # - build-debs
       - build-wheels
       - build-sdist
     runs-on: ubuntu-latest
     steps:
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@v4
-      - name: Build a tarball for the debs
-        # We need to merge all the debs uploads into one folder, then compress
-        # that.
-        run: |
-          mkdir debs
-          mv debs*/* debs/
-          tar -cvJf debs.tar.xz debs
+      # - name: Build a tarball for the debs
+      #   # We need to merge all the debs uploads into one folder, then compress
+      #   # that.
+      #   run: |
+      #     mkdir debs
+      #     mv debs*/* debs/
+      #     tar -cvJf debs.tar.xz debs
       - name: Attach to release
         # Pinned to work around https://github.com/softprops/action-gh-release/issues/445
         uses: softprops/action-gh-release@v0.1.15
@@ -220,7 +227,7 @@ jobs:
           files: |
             Sdist/*
             Wheel*/*
-            debs.tar.xz
+          # debs.tar.xz
           # if it's not already published, keep the release as a draft.
           draft: true
           # mark it as a prerelease if the tag contains 'rc'.
