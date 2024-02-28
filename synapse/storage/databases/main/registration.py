@@ -781,6 +781,15 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             desc="remove_user_external_id",
         )
 
+    async def remove_external_ids_by_user(self, mxid: str) -> None:
+        await self.db_pool.simple_delete(
+            table="user_external_ids",
+            keyvalues={
+                "user_id": mxid,
+            },
+            desc="remove_external_ids_by_user",
+        )
+
     async def replace_user_external_id(
         self,
         record_external_ids: List[Tuple[str, str]],
