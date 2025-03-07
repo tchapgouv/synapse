@@ -16,7 +16,8 @@
 #
 #
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+from typing import Optional, Any
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -26,6 +27,8 @@ from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
+from synapse.api.room_versions import RoomVersions
+from synapse.federation.federation_client import FederationClient
 
 from tests import unittest
 
@@ -40,6 +43,9 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         room.register_servlets,
         user_directory.register_servlets,
     ]
+
+    federation_client: Optional[FederationClient] = None
+    transport_layer: Optional[Any] = None
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         """Create a homeserver with federation enabled and user directory enabled."""
@@ -234,4 +240,105 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         )
 
         # Check that the result is an empty result set
-        self.assertEqual(result, {"limited": False, "results": []}) 
+        self.assertEqual(result, {"limited": False, "results": []})
+
+    def test_user_directory_search_with_token(self) -> None:
+        """Test that the user directory search endpoint correctly handles search tokens."""
+        # Create a user
+        user_id = self.register_user("user", "password")
+        access_token = self.login("user", "password")
+
+        # Mock the user_directory_handler's search_users method
+        with patch.object(
+            self.hs.get_user_directory_handler(),
+            "search_users",
+            new=AsyncMock(
+                return_value={
+                    "limited": True,
+                    "results": [
+                        {
+                            "user_id": "@user:test",
+                            "display_name": "Test User",
+                            "avatar_url": "mxc://example.com/avatar",
+                        }
+                    ],
+                    "search_token": "test_token_123",
+                }
+            ),
+        ):
+            # Make a search request
+            channel = self.make_request(
+                "POST",
+                "/_matrix/client/v3/user_directory/search",
+                {"search_term": "test", "limit": 10},
+                access_token=access_token,
+            )
+
+            # Check that the response contains a search token
+            self.assertEqual(channel.code, 200)
+            self.assertEqual(channel.json_body.get("search_token"), "test_token_123")
+            self.assertTrue(channel.json_body.get("limited"))
+
+    def test_user_directory_search_with_token_federated_results(self) -> None:
+        """Test that the user directory search endpoint correctly handles federated results with search tokens."""
+        # Create a user
+        user_id = self.register_user("user", "password")
+        access_token = self.login("user", "password")
+
+        # Mock the user_directory_handler's get_federated_search_results method
+        with patch.object(
+            self.hs.get_user_directory_handler(),
+            "get_federated_search_results",
+            new=AsyncMock(
+                return_value={
+                    "limited": False,
+                    "results": [
+                        {
+                            "user_id": "@user:other.example.com",
+                            "display_name": "Remote User",
+                            "avatar_url": "mxc://example.com/remote_avatar",
+                        }
+                    ],
+                }
+            ),
+        ):
+            # Make a search request with a token
+            channel = self.make_request(
+                "POST",
+                "/_matrix/client/v3/user_directory/search",
+                {"search_term": "test", "limit": 10, "search_token": "test_token_123"},
+                access_token=access_token,
+            )
+
+            # Check that the response contains federated results
+            self.assertEqual(channel.code, 200)
+            self.assertEqual(len(channel.json_body.get("results", [])), 1)
+            self.assertEqual(
+                channel.json_body.get("results", [])[0].get("user_id"),
+                "@user:other.example.com",
+            )
+
+    def test_user_directory_search_with_token_no_results(self) -> None:
+        """Test that the user directory search endpoint correctly handles no federated results."""
+        # Create a user
+        user_id = self.register_user("user", "password")
+        access_token = self.login("user", "password")
+
+        # Mock the user_directory_handler's get_federated_search_results method
+        with patch.object(
+            self.hs.get_user_directory_handler(),
+            "get_federated_search_results",
+            new=AsyncMock(return_value={"limited": False, "results": []}),
+        ):
+            # Make a search request with a token
+            channel = self.make_request(
+                "POST",
+                "/_matrix/client/v3/user_directory/search",
+                {"search_term": "test", "limit": 10, "search_token": "test_token_123"},
+                access_token=access_token,
+            )
+
+            # Check that the response is empty
+            self.assertEqual(channel.code, 200)
+            self.assertEqual(len(channel.json_body.get("results", [])), 0)
+            self.assertFalse(channel.json_body.get("limited", False)) 

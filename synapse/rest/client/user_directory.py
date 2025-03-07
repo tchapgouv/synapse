@@ -20,13 +20,15 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+import time
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from synapse.api.errors import SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonMapping
+from synapse.util.async_helpers import maybe_awaitable, run_in_background
 
 from ._base import client_patterns
 
@@ -45,8 +47,8 @@ class UserDirectorySearchRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
-        self.federation_client = hs.get_federation_client()
-        self.state = hs.get_state_handler()
+        self.clock = hs.get_clock()
+        self.is_mine_server_name = hs.is_mine_server_name
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonMapping]:
         """Searches for users in directory, including federated results
@@ -55,7 +57,7 @@ class UserDirectorySearchRestServlet(RestServlet):
             {
                 "search_term": "search query",
                 "limit": 10,
-                "include_federation": true  # Optional, defaults to false
+                "search_token": "a1d29g4f73"  # Optional, for retrieving more results
             }
 
         Returns:
@@ -67,9 +69,11 @@ class UserDirectorySearchRestServlet(RestServlet):
                         {
                             "user_id": <user_id>,
                             "display_name": <display_name>,
-                            "avatar_url": <avatar_url>
+                            "avatar_url": <avatar_url>,
+                            "m.user_directory.visibility": <visibility>
                         }
-                    ]
+                    ],
+                    "search_token": <token for retrieving more results>
                 }
         """
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
@@ -88,62 +92,54 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
+        # Check if we have a search token
+        search_token = body.get("search_token")
+
+        # If we have a search token, this is a request for more results
+        if search_token:
+            # Wait for federated results
+            start_time = time.time()
+            timeout = 30.0  # 30 seconds timeout
+            
+            # Try to get federated results from cache
+            federated_results = await self.user_directory_handler.get_federated_search_results(
+                user_id, search_term, limit, search_token
+            )
+            
+            # If we got results or timed out, return them
+            if federated_results.get("results") or (time.time() - start_time) >= timeout:
+                return 200, federated_results
+            
+            # If we didn't get results yet, wait a bit and try again
+            # This simulates long-polling
+            await self.clock.sleep(1.0)
+            
+            # Try again to get results from cache
+            federated_results = await self.user_directory_handler.get_federated_search_results(
+                user_id, search_term, limit, search_token
+            )
+            
+            return 200, federated_results
+        
         # Get local results first
         local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
 
-        # Check if federation search is requested
-        if not body.get("include_federation", False):
-            return 200, local_results
-
-        # Get the list of rooms the user is in
-        rooms = await self.state.get_current_user_in_room_ids(user_id)
-        
-        # Get the list of servers in those rooms
-        servers_in_rooms = set()
-        for room_id in rooms:
-            servers_in_room = await self.state.get_current_hosts_in_room(room_id)
-            servers_in_rooms.update(servers_in_room)
-        
-        # Remove our own server
-        servers_in_rooms.discard(self.hs.hostname)
-        servers = list(servers_in_rooms)
-
-        # If no remote servers to query, just return local results
-        if not servers:
-            return 200, local_results
-
-        # Query federated servers
-        federated_results = await self.federation_client.search_user_directory_across_federation(
-            servers, search_term, limit
-        )
-
-        # Combine local and federated results
-        combined_results = local_results.get("results", []) + federated_results.get("results", [])
-        
-        # Remove duplicates (by user_id)
-        seen_user_ids = set()
-        unique_results = []
-        for user in combined_results:
-            if user["user_id"] not in seen_user_ids:
-                seen_user_ids.add(user["user_id"])
-                unique_results.append(user)
-
-        # Sort results by display name (case insensitive)
-        unique_results.sort(
-            key=lambda user: (
-                user.get("display_name", "").lower() if user.get("display_name") else "",
-                user.get("user_id", ""),
+        # Start the federated search in the background
+        # This will be picked up by the next request with the search_token
+        if local_results.get("search_token"):
+            search_token = local_results["search_token"]
+            
+            # Start the federated search in the background
+            # We don't await this, it will run in the background
+            run_in_background(
+                lambda: self.user_directory_handler.get_federated_search_results(
+                    user_id, search_term, limit, search_token
+                )
             )
-        )
 
-        # Limit the total number of results
-        limited = len(unique_results) > limit
-        if limited:
-            unique_results = unique_results[:limit]
-
-        return 200, {"limited": limited, "results": unique_results}
+        return 200, local_results
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
