@@ -1390,6 +1390,43 @@ class FederationServer(FederationBase):
         ):
             raise AuthError(code=403, msg="Server is banned from room")
 
+    async def on_user_directory_search_request(
+        self, origin: str, search_term: str, limit: int
+    ) -> Tuple[int, JsonDict]:
+        """Handle a search request from a remote server
+
+        Args:
+            origin: The server that sent the search request
+            search_term: The term to search for
+            limit: Maximum number of results to return
+
+        Returns:
+            A tuple of (response code, response json)
+        """
+        # We need to check if the server is allowed to see our directory
+        if not self.hs.config.server.allow_profile_lookup_over_federation:
+            # If we don't allow profile lookups over federation, we shouldn't
+            # allow user directory searches either
+            raise SynapseError(
+                403,
+                "User directory search over federation is not enabled on this server",
+                Codes.FORBIDDEN,
+            )
+
+        # Get the user directory handler
+        user_directory_handler = self.hs.get_user_directory_handler()
+
+        # Use a dummy user_id from the requesting server for the search
+        # This ensures we only return results that would be visible to users on that server
+        dummy_user_id = f"@federation_search:{origin}"
+
+        # Perform the search
+        results = await user_directory_handler.search_users(
+            dummy_user_id, search_term, limit
+        )
+
+        return 200, results
+
 
 class FederationHandlerRegistry:
     """Allows classes to register themselves as handlers for a given EDU or

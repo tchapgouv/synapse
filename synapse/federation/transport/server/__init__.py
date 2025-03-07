@@ -33,6 +33,7 @@ from synapse.federation.transport.server.federation import (
     FederationMediaDownloadServlet,
     FederationMediaThumbnailServlet,
     FederationUnstableClientKeysClaimServlet,
+    FederationUserDirectorySearchServlet,
 )
 from synapse.http.server import HttpServer, JsonResource
 from synapse.http.servlet import (
@@ -313,6 +314,13 @@ def register_servlets(
                 and not hs.config.experimental.msc3720_enabled
             ):
                 continue
+
+            if (
+                servletclass == FederationUserDirectorySearchServlet
+                and not hs.config.experimental.msc4258_enabled
+            ):
+                continue
+
             if (
                 servletclass == FederationUnstableClientKeysClaimServlet
                 and not hs.config.experimental.msc3983_appservice_otk_claims

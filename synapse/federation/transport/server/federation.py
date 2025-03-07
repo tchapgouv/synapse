@@ -882,6 +882,53 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
+class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
+    """
+    Implements a federation API endpoint for searching a server's user directory.
+
+    POST /_matrix/federation/v3/user_directory/search
+
+    Request:
+    {
+        "search_term": "search query",
+        "limit": 10
+    }
+
+    Response:
+    {
+        "limited": false,
+        "results": [
+            {
+                "user_id": "@user:example.com",
+                "display_name": "Display Name",
+                "avatar_url": "mxc://example.com/avatar",
+                "m.user_directory.visibility": "local"
+            }
+        ]
+    }
+    """
+    PATH = "/user_directory/search"
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4258"
+    RATELIMIT = True
+
+    async def on_POST(
+        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
+    ) -> Tuple[int, JsonDict]:
+        search_term = content.get("search_term")
+        if not search_term or not isinstance(search_term, str):
+            raise SynapseError(400, "Missing or invalid search_term", Codes.BAD_JSON)
+
+        limit = content.get("limit", 10)
+        if not isinstance(limit, int):
+            raise SynapseError(400, "Invalid limit", Codes.BAD_JSON)
+        
+        limit = max(min(limit, 50), 0)  # Clamp limit between 0 and 50
+
+        return await self.handler.on_user_directory_search_request(
+            origin, search_term, limit
+        )
+
+
 FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
@@ -892,25 +939,24 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationQueryServlet,
     FederationMakeJoinServlet,
     FederationMakeLeaveServlet,
-    FederationEventServlet,
-    FederationV1SendJoinServlet,
-    FederationV2SendJoinServlet,
     FederationV1SendLeaveServlet,
     FederationV2SendLeaveServlet,
+    FederationV1SendJoinServlet,
+    FederationV2SendJoinServlet,
     FederationV1InviteServlet,
     FederationV2InviteServlet,
-    FederationGetMissingEventsServlet,
-    FederationEventAuthServlet,
+    FederationThirdPartyInviteExchangeServlet,
     FederationClientKeysQueryServlet,
     FederationUserDevicesQueryServlet,
     FederationClientKeysClaimServlet,
     FederationUnstableClientKeysClaimServlet,
-    FederationThirdPartyInviteExchangeServlet,
+    FederationGetMissingEventsServlet,
     On3pidBindServlet,
     FederationVersionServlet,
-    RoomComplexityServlet,
     FederationRoomHierarchyServlet,
-    FederationV1SendKnockServlet,
+    RoomComplexityServlet,
+    FederationEventAuthServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationUserDirectorySearchServlet,
 )

@@ -45,9 +45,18 @@ class UserDirectorySearchRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
+        self.federation_client = hs.get_federation_client()
+        self.state = hs.get_state_handler()
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonMapping]:
-        """Searches for users in directory
+        """Searches for users in directory, including federated results
+
+        Request:
+            {
+                "search_term": "search query",
+                "limit": 10,
+                "include_federation": true  # Optional, defaults to false
+            }
 
         Returns:
             dict of the form::
@@ -79,11 +88,62 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        results = await self.user_directory_handler.search_users(
+        # Get local results first
+        local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
 
-        return 200, results
+        # Check if federation search is requested
+        if not body.get("include_federation", False):
+            return 200, local_results
+
+        # Get the list of rooms the user is in
+        rooms = await self.state.get_current_user_in_room_ids(user_id)
+        
+        # Get the list of servers in those rooms
+        servers_in_rooms = set()
+        for room_id in rooms:
+            servers_in_room = await self.state.get_current_hosts_in_room(room_id)
+            servers_in_rooms.update(servers_in_room)
+        
+        # Remove our own server
+        servers_in_rooms.discard(self.hs.hostname)
+        servers = list(servers_in_rooms)
+
+        # If no remote servers to query, just return local results
+        if not servers:
+            return 200, local_results
+
+        # Query federated servers
+        federated_results = await self.federation_client.search_user_directory_across_federation(
+            servers, search_term, limit
+        )
+
+        # Combine local and federated results
+        combined_results = local_results.get("results", []) + federated_results.get("results", [])
+        
+        # Remove duplicates (by user_id)
+        seen_user_ids = set()
+        unique_results = []
+        for user in combined_results:
+            if user["user_id"] not in seen_user_ids:
+                seen_user_ids.add(user["user_id"])
+                unique_results.append(user)
+
+        # Sort results by display name (case insensitive)
+        unique_results.sort(
+            key=lambda user: (
+                user.get("display_name", "").lower() if user.get("display_name") else "",
+                user.get("user_id", ""),
+            )
+        )
+
+        # Limit the total number of results
+        limited = len(unique_results) > limit
+        if limited:
+            unique_results = unique_results[:limit]
+
+        return 200, {"limited": limited, "results": unique_results}
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

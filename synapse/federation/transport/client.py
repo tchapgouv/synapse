@@ -869,6 +869,24 @@ class TransportLayerClient:
             destination=destination, path=path, data={"user_ids": user_ids}
         )
 
+    async def user_directory_search(
+        self, destination: str, search_term: str, limit: int
+    ) -> JsonDict:
+        """
+        Search for users in the user directory of a remote server.
+
+        Args:
+            destination: The server to query.
+            search_term: The search term to look for.
+            limit: Maximum number of results to return.
+
+        Returns:
+            The search results.
+        """
+        path = _create_path(FEDERATION_V2_PREFIX + "/v1", "/user_directory/search")
+        content = {"search_term": search_term, "limit": limit}
+        return await self.client.post_json(destination, path=path, data=content)
+
     async def download_media_r0(
         self,
         destination: str,
