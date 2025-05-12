@@ -751,7 +751,7 @@ def max_request_body_size(config: HomeServerConfig) -> int:
     #
     # in short, we somewhat arbitrarily limit requests to 200 * 64K (about 12.5M)
     #
-    max_request_size = 200 * MAX_PDU_SIZE
+    max_request_size = 1000 * MAX_PDU_SIZE
 
     # if we have a media repo enabled, we may need to allow larger uploads than that
     if config.media.can_load_media_repo:
