@@ -150,6 +150,12 @@ class PusherPool:
             device_id = existing_config.device_id
             access_token_id = existing_config.access_token
 
+        # email pushers shouldn't be associated with a device or access token,
+        # otherwise they will be removed when the device logs out.
+        if kind == "email":
+            device_id = None
+            access_token_id = None
+
         # we try to create the pusher just to validate the config: it
         # will then get pulled out of the database,
         # recreated, added and started: this means we have only one
