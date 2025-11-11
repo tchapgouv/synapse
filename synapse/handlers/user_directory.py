@@ -157,7 +157,7 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Cache for storing search results with tokens
         self.search_response_cache: ResponseCache = ResponseCache(
-            hs.get_clock(), "user_directory_search", timeout_ms=60 * 60 * 1000
+            clock=hs.get_clock(), name="user_directory_search", server_name=self.server_name, timeout_ms=60 * 60 * 1000
         )
 
         if self.update_user_directory:

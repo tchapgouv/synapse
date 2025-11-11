@@ -85,7 +85,7 @@ from synapse.util.retryutils import NotRetryingDestination
 from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
 from synapse.types import JsonDict, UserID
-from synapse.util import json_decoder, unwrapFirstError
+from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.caches.response_cache import ResponseCache
 from twisted.internet import defer
