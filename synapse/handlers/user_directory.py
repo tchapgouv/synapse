@@ -20,8 +20,20 @@
 #
 
 import logging
+import random
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    cast,
+)
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -36,17 +48,26 @@ from synapse.api.constants import (
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none
+from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+    from typing import TypedDict
+
+    class UserDirectorySearchResult(TypedDict, total=False):
+        limited: bool
+        results: List[Dict[str, Any]]
+        search_token: str
+
+# Use the existing SearchResult type from the storage module
+from synapse.storage.databases.main.user_directory import SearchResult as StorageSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +136,8 @@ class UserDirectoryHandler(StateDeltasHandler):
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._hs = hs
+        self.federation_client = hs.get_federation_client()
+        self.state = hs.get_state_handler()
 
         # The current position in the current_state_delta stream
         self.pos: Optional[int] = None
@@ -132,22 +155,37 @@ class UserDirectoryHandler(StateDeltasHandler):
         # Set of server names.
         self._is_refreshing_remote_profiles_for_servers: Set[str] = set()
 
+        # Cache for storing search results with tokens
+        self.search_response_cache: ResponseCache = ResponseCache(
+            clock=hs.get_clock(), name="user_directory_search", server_name=self.server_name, timeout_ms=60 * 60 * 1000
+        )
+
         if self.update_user_directory:
             self.notifier.add_replication_callback(self.notify_new_event)
 
             # We kick this off so that we don't have to wait for a change before
             # we start populating the user directory
-            self.clock.call_later(0, self.notify_new_event)
+            self.clock.call_later(
+                0,
+                self.notify_new_event,
+            )
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
-                10, self.kick_off_remote_profile_refresh_process
+                10,
+                self.kick_off_remote_profile_refresh_process,
             )
 
     async def search_users(
-        self, user_id: str, search_term: str, limit: int
-    ) -> SearchResult:
+        self, user_id: str, search_term: str, limit: int, search_token: Optional[str] = None
+    ) -> StorageSearchResult:
         """Searches for users in directory
+
+        Args:
+            user_id: The user performing the search
+            search_term: The term to search for
+            limit: Maximum number of results to return
+            search_token: Optional token from a previous search to retrieve more results
 
         Returns:
             dict of the form::
@@ -160,9 +198,17 @@ class UserDirectoryHandler(StateDeltasHandler):
                             "display_name": <display_name>,
                             "avatar_url": <avatar_url>
                         }
-                    ]
+                    ],
+                    "search_token": <token for retrieving more results>
                 }
         """
+        # If we have a search token, check if we have cached results
+        if search_token:
+            cached_result = await self.search_response_cache.get(search_token)
+            if cached_result:
+                return cast(StorageSearchResult, cached_result)
+
+        # Get local results
         results = await self.store.search_user_dir(
             user_id, search_term, limit, self.show_locked_users
         )
@@ -176,7 +222,77 @@ class UserDirectoryHandler(StateDeltasHandler):
                 non_spammy_users.append(user)
         results["results"] = non_spammy_users
 
+        # Generate a search token for retrieving more results
+        if not search_token:
+            # Only generate a token for the first request
+            search_token = self._generate_search_token()
+            # Add the search token to the results
+            # We need to create a new dict to avoid modifying the original
+            results_with_token = dict(results)
+            results_with_token["search_token"] = search_token
+            results_with_token["limited"] = True  # Set limited to true to indicate more results may be available
+            return cast(StorageSearchResult, results_with_token)
+
         return results
+
+    async def get_federated_search_results(
+        self, user_id: str, search_term: str, limit: int, search_token: str
+    ) -> Dict[str, Any]:
+        """Get search results from federated servers.
+
+        Args:
+            user_id: The user performing the search
+            search_term: The term to search for
+            limit: Maximum number of results to return
+            search_token: Token from a previous search
+
+        Returns:
+            Search results from federated servers
+        """
+        # Use the cache key as the search token
+        cache_key = search_token
+
+        # Define the function to get federated results
+        async def _get_federated_results() -> Dict[str, Any]:
+            # Get the list of rooms the user is in
+            # We need to get the room IDs from the user's membership
+            room_ids = await self.store.get_rooms_for_user(user_id)
+            
+            # Get the list of servers in those rooms
+            servers_in_rooms = set()
+            for room_id in room_ids:
+                # Get the current hosts in the room
+                hosts = await self.store.get_current_hosts_in_room(room_id)
+                servers_in_rooms.update(hosts)
+            
+            # Remove our own server
+            servers_in_rooms.discard(self._hs.hostname)
+            servers = list(servers_in_rooms)
+
+            # If no remote servers to query, return empty results
+            if not servers:
+                return {"limited": False, "results": []}
+
+            # Query federated servers
+            federated_results = await self.federation_client.search_user_directory_across_federation(
+                servers, search_term, limit
+            )
+
+            return federated_results
+
+        # Use the wrap method to get or compute the results
+        return await self.search_response_cache.wrap(
+            cache_key, _get_federated_results
+        )
+
+    def _generate_search_token(self) -> str:
+        """Generate a unique search token.
+
+        Returns:
+            A unique search token
+        """
+        # Generate a random token
+        return str(self.clock.time_msec()) + "_" + str(random.randint(0, 1000000))
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""
@@ -193,9 +309,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_processing = False
 
         self._is_processing = True
-        run_as_background_process(
-            "user_directory.notify_new_event", self.server_name, process
-        )
+        self._hs.run_as_background_process("user_directory.notify_new_event", process)
 
     async def handle_local_profile_change(
         self, user_id: str, profile: ProfileInfo
@@ -609,8 +723,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles = False
 
         self._is_refreshing_remote_profiles = True
-        run_as_background_process(
-            "user_directory.refresh_remote_profiles", self.server_name, process
+        self._hs.run_as_background_process(
+            "user_directory.refresh_remote_profiles", process
         )
 
     async def _unsafe_refresh_remote_profiles(self) -> None:
@@ -655,8 +769,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 if not users:
                     return
                 _, _, next_try_at_ts = users[0]
+                delay = ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2
                 self._refresh_remote_profiles_call_later = self.clock.call_later(
-                    ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2,
+                    delay,
                     self.kick_off_remote_profile_refresh_process,
                 )
 
@@ -692,9 +807,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles_for_servers.remove(server_name)
 
         self._is_refreshing_remote_profiles_for_servers.add(server_name)
-        run_as_background_process(
+        self._hs.run_as_background_process(
             "user_directory.refresh_remote_profiles_for_remote_server",
-            self.server_name,
             process,
         )
 

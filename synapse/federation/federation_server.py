@@ -59,7 +59,7 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventPersistencePair
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -159,7 +159,7 @@ class FederationServer(FederationBase):
         # with FederationHandlerRegistry.
         hs.get_directory_handler()
 
-        self._server_linearizer = Linearizer("fed_server")
+        self._server_linearizer = Linearizer(name="fed_server", clock=hs.get_clock())
 
         # origins that we are currently processing a transaction from.
         # a dict from origin to txn id.
@@ -914,7 +914,7 @@ class FederationServer(FederationBase):
 
     async def _on_send_membership_event(
         self, origin: str, content: JsonDict, membership_type: str, room_id: str
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> EventPersistencePair:
         """Handle an on_send_{join,leave,knock} request
 
         Does some preliminary validation before passing the request on to the
@@ -1389,6 +1389,43 @@ class FederationServer(FederationBase):
             server_name
         ):
             raise AuthError(code=403, msg="Server is banned from room")
+
+    async def on_user_directory_search_request(
+        self, origin: str, search_term: str, limit: int
+    ) -> Tuple[int, JsonDict]:
+        """Handle a search request from a remote server
+
+        Args:
+            origin: The server that sent the search request
+            search_term: The term to search for
+            limit: Maximum number of results to return
+
+        Returns:
+            A tuple of (response code, response json)
+        """
+        # We need to check if the server is allowed to see our directory
+        if not self.hs.config.server.allow_profile_lookup_over_federation:
+            # If we don't allow profile lookups over federation, we shouldn't
+            # allow user directory searches either
+            raise SynapseError(
+                403,
+                "User directory search over federation is not enabled on this server",
+                Codes.FORBIDDEN,
+            )
+
+        # Get the user directory handler
+        user_directory_handler = self.hs.get_user_directory_handler()
+
+        # Use a dummy user_id from the requesting server for the search
+        # This ensures we only return results that would be visible to users on that server
+        dummy_user_id = f"@federation_search:{origin}"
+
+        # Perform the search
+        results = await user_directory_handler.search_users(
+            dummy_user_id, search_term, limit
+        )
+
+        return 200, results
 
 
 class FederationHandlerRegistry:

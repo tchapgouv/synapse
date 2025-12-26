@@ -20,13 +20,15 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+import time
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from synapse.api.errors import SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonMapping
+from synapse.util.async_helpers import maybe_awaitable, run_in_background
 
 from ._base import client_patterns
 
@@ -45,9 +47,18 @@ class UserDirectorySearchRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
+        self.clock = hs.get_clock()
+        self.is_mine_server_name = hs.is_mine_server_name
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonMapping]:
-        """Searches for users in directory
+        """Searches for users in directory, including federated results
+
+        Request:
+            {
+                "search_term": "search query",
+                "limit": 10,
+                "search_token": "a1d29g4f73"  # Optional, for retrieving more results
+            }
 
         Returns:
             dict of the form::
@@ -58,9 +69,11 @@ class UserDirectorySearchRestServlet(RestServlet):
                         {
                             "user_id": <user_id>,
                             "display_name": <display_name>,
-                            "avatar_url": <avatar_url>
+                            "avatar_url": <avatar_url>,
+                            "m.user_directory.visibility": <visibility>
                         }
-                    ]
+                    ],
+                    "search_token": <token for retrieving more results>
                 }
         """
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
@@ -79,11 +92,54 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        results = await self.user_directory_handler.search_users(
+        # Check if we have a search token
+        search_token = body.get("search_token")
+
+        # If we have a search token, this is a request for more results
+        if search_token:
+            # Wait for federated results
+            start_time = time.time()
+            timeout = 30.0  # 30 seconds timeout
+            
+            # Try to get federated results from cache
+            federated_results = await self.user_directory_handler.get_federated_search_results(
+                user_id, search_term, limit, search_token
+            )
+            
+            # If we got results or timed out, return them
+            if federated_results.get("results") or (time.time() - start_time) >= timeout:
+                return 200, federated_results
+            
+            # If we didn't get results yet, wait a bit and try again
+            # This simulates long-polling
+            await self.clock.sleep(1.0)
+            
+            # Try again to get results from cache
+            federated_results = await self.user_directory_handler.get_federated_search_results(
+                user_id, search_term, limit, search_token
+            )
+            
+            return 200, federated_results
+        
+        # Get local results first
+        local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
 
-        return 200, results
+        # Start the federated search in the background
+        # This will be picked up by the next request with the search_token
+        if local_results.get("search_token"):
+            search_token = local_results["search_token"]
+            
+            # Start the federated search in the background
+            # We don't await this, it will run in the background
+            run_in_background(
+                lambda: self.user_directory_handler.get_federated_search_results(
+                    user_id, search_term, limit, search_token
+                )
+            )
+
+        return 200, local_results
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

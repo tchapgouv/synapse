@@ -41,6 +41,8 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
+    overload,
 )
 
 import attr
@@ -80,6 +82,14 @@ from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATI
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.retryutils import NotRetryingDestination
+from synapse.logging.context import make_deferred_yieldable
+from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
+from synapse.types import JsonDict, UserID
+from synapse.util import unwrapFirstError
+from synapse.util.async_helpers import timeout_deferred
+from synapse.util.caches.response_cache import ResponseCache
+from twisted.internet import defer
+from twisted.internet.interfaces import IReactorTime
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -148,6 +158,7 @@ class FederationClient(FederationBase):
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self._clock,
             max_len=1000,
             expiry_ms=120 * 1000,
@@ -167,6 +178,7 @@ class FederationClient(FederationBase):
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self._clock,
             max_len=1000,
             expiry_ms=5 * 60 * 1000,
@@ -494,6 +506,43 @@ class FederationClient(FederationBase):
                 e,
             )
             return RECOMMENDATION_OK
+
+    @trace
+    @tag_args
+    async def ask_policy_server_to_sign_event(
+        self, destination: str, pdu: EventBase, timeout: Optional[int] = None
+    ) -> Optional[JsonDict]:
+        """Requests that the destination server (typically a policy server)
+        sign the event as not spam.
+
+        If the policy server could not be contacted or the policy server
+        returned an error, this returns no signature.
+
+        Args:
+            destination: The remote homeserver to ask (a policy server)
+            pdu: The event to sign
+            timeout: How long to try (in ms) the destination for before
+                giving up. None indicates no timeout.
+        Returns:
+            The signature from the policy server, structured in the same was as the 'signatures'
+            JSON in the event e.g { "$policy_server_via_domain" : { "ed25519:policy_server": "signature_base64" }}
+        """
+        logger.debug(
+            "ask_policy_server_to_sign_event for event_id=%s from %s",
+            pdu.event_id,
+            destination,
+        )
+        try:
+            return await self.transport_layer.ask_policy_server_to_sign_event(
+                destination, pdu, timeout=timeout
+            )
+        except Exception as e:
+            logger.warning(
+                "ask_policy_server_to_sign_event: server %s responded with error: %s",
+                destination,
+                e,
+            )
+        return None
 
     @trace
     @tag_args
@@ -1941,6 +1990,103 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_search(
+        self, destination: str, search_term: str, limit: int = 10
+    ) -> JsonDict:
+        """Search for users in the user directory of a remote server.
+
+        Args:
+            destination: The server to query.
+            search_term: The search term to look for.
+            limit: Maximum number of results to return.
+
+        Returns:
+            The search results containing a list of users matching the search term.
+        """
+        # Check if MSC4258 is enabled
+        if not self.hs.config.experimental.msc4258_enabled:
+            return {"limited": False, "results": []}
+
+        try:
+            response = await self.transport_layer.user_directory_search(
+                destination, search_term, limit
+            )
+            return response
+        except HttpResponseException as e:
+            # If the remote server doesn't support this endpoint, return empty results
+            if e.code in (404, 405):
+                return {"limited": False, "results": []}
+            # Otherwise, something else went wrong, so just re-raise
+            raise
+
+    async def search_user_directory_across_federation(
+        self, destinations: Collection[str], search_term: str, limit: int = 10
+    ) -> JsonDict:
+        """Search for users across multiple federated servers.
+
+        Args:
+            destinations: The servers to query.
+            search_term: The search term to look for.
+            limit: Maximum number of results to return per server.
+
+        Returns:
+            Combined search results from all servers.
+        """
+        # Check if MSC4258 is enabled
+        if not self.hs.config.experimental.msc4258_enabled:
+            return {"limited": False, "results": []}
+
+        if not destinations:
+            return {"limited": False, "results": []}
+
+        # Query each server individually and collect results
+        combined_results = []
+        limited = False
+
+        # Create a list of deferreds to query each server
+        query_tasks = []
+        for destination in destinations:
+            if not self._is_mine_server_name(destination):
+                # Convert coroutine to Deferred
+                deferred = defer.ensureDeferred(
+                    self.user_directory_search(destination, search_term, limit)
+                )
+                query_tasks.append(deferred)
+
+        # Execute all queries in parallel
+        if query_tasks:
+            try:
+                server_results = await make_deferred_yieldable(
+                    defer.gatherResults(
+                        query_tasks,
+                        consumeErrors=True,
+                    )
+                )
+
+                # Process results from each server
+                for result in server_results:
+                    if result.get("limited", False):
+                        limited = True
+                    combined_results.extend(result.get("results", []))
+            except Exception:
+                # If something goes wrong, we still want to return what we have
+                logger.exception("Error searching user directory across federation")
+        
+        # Sort results by display name (case insensitive)
+        combined_results.sort(
+            key=lambda user: (
+                user.get("display_name", "").lower() if user.get("display_name") else "",
+                user.get("user_id", ""),
+            )
+        )
+
+        # Limit the total number of results
+        if len(combined_results) > limit:
+            combined_results = combined_results[:limit]
+            limited = True
+
+        return {"limited": limited, "results": combined_results}
 
     async def federation_download_media(
         self,

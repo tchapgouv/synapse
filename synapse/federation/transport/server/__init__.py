@@ -33,6 +33,7 @@ from synapse.federation.transport.server.federation import (
     FederationMediaDownloadServlet,
     FederationMediaThumbnailServlet,
     FederationUnstableClientKeysClaimServlet,
+    FederationUserDirectorySearchServlet,
 )
 from synapse.http.server import HttpServer, JsonResource
 from synapse.http.servlet import (
@@ -135,7 +136,7 @@ class PublicRoomList(BaseFederationServlet):
         if not self.allow_access:
             raise FederationDeniedError(origin)
 
-        limit = parse_integer_from_args(query, "limit", 0)
+        limit: Optional[int] = parse_integer_from_args(query, "limit", 0)
         since_token = parse_string_from_args(query, "since", None)
         include_all_networks = parse_boolean_from_args(
             query, "include_all_networks", default=False
@@ -313,6 +314,13 @@ def register_servlets(
                 and not hs.config.experimental.msc3720_enabled
             ):
                 continue
+
+            if (
+                servletclass == FederationUserDirectorySearchServlet
+                and not hs.config.experimental.msc4258_enabled
+            ):
+                continue
+
             if (
                 servletclass == FederationUnstableClientKeysClaimServlet
                 and not hs.config.experimental.msc3983_appservice_otk_claims

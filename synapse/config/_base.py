@@ -22,6 +22,7 @@
 
 import argparse
 import errno
+import importlib.resources as importlib_resources
 import logging
 import os
 import re
@@ -46,7 +47,6 @@ from typing import (
 
 import attr
 import jinja2
-import pkg_resources
 import yaml
 
 from synapse.types import StrSequence
@@ -174,8 +174,8 @@ class Config:
         self.root = root_config
 
         # Get the path to the default Synapse template directory
-        self.default_template_dir = pkg_resources.resource_filename(
-            "synapse", "res/templates"
+        self.default_template_dir = str(
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
         )
 
     @staticmethod
@@ -545,18 +545,22 @@ class RootConfig:
 
     @classmethod
     def load_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: Type[TRootConfig], description: str, argv_options: List[str]
     ) -> TRootConfig:
         """Parse the commandline and config files
 
         Doesn't support config-file-generation: used by the worker apps.
+
+        Args:
+            description: TODO
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Config object.
         """
         config_parser = argparse.ArgumentParser(description=description)
         cls.add_arguments_to_parser(config_parser)
-        obj, _ = cls.load_config_with_parser(config_parser, argv)
+        obj, _ = cls.load_config_with_parser(config_parser, argv_options)
 
         return obj
 
@@ -601,7 +605,7 @@ class RootConfig:
 
     @classmethod
     def load_config_with_parser(
-        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv: List[str]
+        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv_options: List[str]
     ) -> Tuple[TRootConfig, argparse.Namespace]:
         """Parse the commandline and config files with the given parser
 
@@ -609,16 +613,20 @@ class RootConfig:
 
         Used for workers where we want to add extra flags/subcommands.
 
+        Note: This is the common denominator for loading config and is also used by
+        `load_config` and `load_or_generate_config`. Which is why we call
+        `validate_config()` here.
+
         Args:
             parser
-            argv
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Returns the parsed config object and the parsed argparse.Namespace
             object from parser.parse_args(..)`
         """
 
-        config_args = parser.parse_args(argv)
+        config_args = parser.parse_args(argv_options)
 
         config_files = find_config_files(search_paths=config_args.config_path)
         obj = cls(config_files)
@@ -642,15 +650,23 @@ class RootConfig:
 
         obj.invoke_all("read_arguments", config_args)
 
+        # Now that we finally have the full config sections parsed, allow subclasses to
+        # do some extra validation across the entire config.
+        obj.validate_config()
+
         return obj, config_args
 
     @classmethod
     def load_or_generate_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: Type[TRootConfig], description: str, argv_options: List[str]
     ) -> Optional[TRootConfig]:
         """Parse the commandline and config files
 
         Supports generation of config files, so is used for the main homeserver app.
+
+        Args:
+            description: TODO
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Config object, or None if --generate-config or --generate-keys was set
@@ -747,7 +763,7 @@ class RootConfig:
         )
 
         cls.invoke_all_static("add_arguments", parser)
-        config_args = parser.parse_args(argv)
+        config_args = parser.parse_args(argv_options)
 
         config_files = find_config_files(search_paths=config_args.config_path)
 
@@ -838,15 +854,7 @@ class RootConfig:
         ):
             return None
 
-        obj.parse_config_dict(
-            config_dict,
-            config_dir_path=config_dir_path,
-            data_dir_path=data_dir_path,
-            allow_secrets_in_config=config_args.secrets_in_config,
-        )
-        obj.invoke_all("read_arguments", config_args)
-
-        return obj
+        return cls.load_config(description, argv_options)
 
     def parse_config_dict(
         self,
@@ -906,6 +914,20 @@ class RootConfig:
 
         existing_config.root = None
         return existing_config
+
+    def validate_config(self) -> None:
+        """
+        Additional config validation across all config sections.
+
+        Override this in subclasses to add extra validation. This is called once all
+        config option values have been populated.
+
+        XXX: This should only validate, not modify the configuration, as the final
+        config state is required for proper validation across all config sections.
+
+        Raises:
+            ConfigError: if the config is invalid.
+        """
 
 
 def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]:
