@@ -52,7 +52,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ThumbnailProvider
-from synapse.types import JsonDict, get_domain_from_id
+from synapse.types import JsonDict, JsonMapping, get_domain_from_id
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -915,7 +915,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
 
     async def on_POST(
         self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+    ) -> Tuple[int, JsonMapping]:
         requester = content.get("requester")
         if requester is None or get_domain_from_id(requester) == origin:
             raise SynapseError(400, "Missing or invalid requester", Codes.BAD_JSON)

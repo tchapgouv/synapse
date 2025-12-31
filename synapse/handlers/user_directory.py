@@ -30,6 +30,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TypedDict,
     cast,
 )
 
@@ -55,20 +56,10 @@ from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:
-    from typing import TypedDict
-
     from synapse.server import HomeServer
-
-    class UserDirectorySearchResult(TypedDict, total=False):
-        limited: bool
-        results: List[Dict[str, Any]]
-        search_token: str
 
 
 # Use the existing SearchResult type from the storage module
-from synapse.storage.databases.main.user_directory import (
-    SearchResult as StorageSearchResult,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +86,12 @@ def calculate_time_of_next_retry(now_ts: int, retry_count: int) -> int:
     1 min, 5 min, 25 min, 2 hour, 10 hour, 52 hour, 10 day, 7.75 week
     """
     return now_ts + 60_000 * (5 ** min(retry_count, 7))
+
+
+class UserDirectorySearchResult(TypedDict, total=False):
+    limited: bool
+    results: List[Dict[str, Any]]
+    search_token: str
 
 
 class UserDirectoryHandler(StateDeltasHandler):
@@ -189,7 +186,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         search_term: str,
         limit: int,
         search_token: Optional[str] = None,
-    ) -> StorageSearchResult:
+    ) -> UserDirectorySearchResult:
         """Searches for users in directory
 
         Args:
@@ -214,11 +211,19 @@ class UserDirectoryHandler(StateDeltasHandler):
                 }
         """
         # If we have a search token, check if we have cached results
-        if search_token:
-            cached_result = await self.search_response_cache.get(search_token)
-            if cached_result:
-                return cast(StorageSearchResult, cached_result)
+        key = (limit, search_token)
+        return await self.search_response_cache.wrap(
+            key,
+            self._search_user_dir,
+            user_id,
+            search_term,
+            limit,
+            search_token=search_token,
+        )
 
+    async def _search_user_dir(
+        self, user_id: str, search_term: str, limit: int, search_token: Optional[str]
+    ) -> UserDirectorySearchResult:
         # Get local results
         results = await self.store.search_user_dir(
             user_id, search_term, limit, self.show_locked_users
@@ -244,9 +249,8 @@ class UserDirectoryHandler(StateDeltasHandler):
             results_with_token["limited"] = (
                 True  # Set limited to true to indicate more results may be available
             )
-            return cast(StorageSearchResult, results_with_token)
-
-        return results
+            return cast(UserDirectorySearchResult, results_with_token)
+        return cast(UserDirectorySearchResult, results)
 
     async def get_federated_search_results(
         self, user_id: str, search_term: str, limit: int, search_token: str

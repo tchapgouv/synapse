@@ -101,7 +101,11 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
         channel = self.make_signed_federation_request(
             "POST",
             "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
-            content={"requester": "@user:test", "search_term": "nonexistent", "limit": 10},
+            content={
+                "requester": "@user:test",
+                "search_term": "nonexistent",
+                "limit": 10,
+            },
         )
 
         # Check that the response is correct

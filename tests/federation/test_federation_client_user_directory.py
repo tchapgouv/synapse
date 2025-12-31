@@ -86,7 +86,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method
         result = self.get_success(
             self.federation_client.user_directory_search(
-                "@requester:example.com","other.example.com", "test", 10
+                "@requester:example.com", "other.example.com", "test", 10
             )
         )
 
@@ -95,7 +95,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
 
         # Check that user_directory_search was called with the correct arguments
         self.transport_layer.user_directory_search.assert_called_once_with(
-            "@requester:example.com","other.example.com", "test", 10
+            "@requester:example.com", "other.example.com", "test", 10
         )
 
     def test_user_directory_search_endpoint_not_found(self) -> None:
@@ -110,7 +110,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method
         result = self.get_success(
             self.federation_client.user_directory_search(
-                "@requester:example.com","other.example.com", "test", 10
+                "@requester:example.com", "other.example.com", "test", 10
             )
         )
 
@@ -156,7 +156,10 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                "@requester:example.com",["server1.example.com", "server2.example.com"], "test", 10
+                "@requester:example.com",
+                ["server1.example.com", "server2.example.com"],
+                "test",
+                10,
             )
         )
 
@@ -206,7 +209,10 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method with a limit of 5
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                "@requester:example.com",["server1.example.com", "server2.example.com"], "test", 5
+                "@requester:example.com",
+                ["server1.example.com", "server2.example.com"],
+                "test",
+                5,
             )
         )
 
@@ -219,7 +225,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method with an empty destination list
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                "@requester:example.com",[], "test", 10
+                "@requester:example.com", [], "test", 10
             )
         )
 
@@ -236,7 +242,10 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                "@requester:example.com",["server1.example.com", "server2.example.com"], "test", 10
+                "@requester:example.com",
+                ["server1.example.com", "server2.example.com"],
+                "test",
+                10,
             )
         )
 
