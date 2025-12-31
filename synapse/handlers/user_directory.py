@@ -234,7 +234,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         results["results"] = non_spammy_users
 
         # Generate a search token for retrieving more results
-        if not search_token:
+        if not search_token and results["limited"] is True:
             # Only generate a token for the first request
             search_token = self._generate_search_token()
             # Add the search token to the results
