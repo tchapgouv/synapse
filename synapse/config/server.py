@@ -562,7 +562,7 @@ class ServerConfig(Config):
             self.allow_public_rooms_over_federation = config.get(
                 "allow_public_rooms_over_federation", False
             )
-            
+
             # If set to 'true', allows any other homeserver to query the user directory
             # via federation. Defaults to 'false'.
             self.allow_profile_lookup_over_federation = config.get(

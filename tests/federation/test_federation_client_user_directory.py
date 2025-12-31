@@ -16,19 +16,18 @@
 #
 #
 
+from typing import Any, Optional
 from unittest.mock import AsyncMock, patch
-from typing import Optional, Any
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import HttpResponseException
+from synapse.federation.federation_client import FederationClient
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
-from synapse.api.room_versions import RoomVersions
-from synapse.federation.federation_client import FederationClient
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -80,12 +79,14 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
                 }
             ],
         }
-        self.transport_layer.user_directory_search = AsyncMock(return_value=mock_results)
+        self.transport_layer.user_directory_search = AsyncMock(
+            return_value=mock_results
+        )
 
         # Call the federation client method
         result = self.get_success(
             self.federation_client.user_directory_search(
-                "other.example.com", "test", 10
+                "@requester:example.com","other.example.com", "test", 10
             )
         )
 
@@ -94,7 +95,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
 
         # Check that user_directory_search was called with the correct arguments
         self.transport_layer.user_directory_search.assert_called_once_with(
-            "other.example.com", "test", 10
+            "@requester:example.com","other.example.com", "test", 10
         )
 
     def test_user_directory_search_endpoint_not_found(self) -> None:
@@ -109,7 +110,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method
         result = self.get_success(
             self.federation_client.user_directory_search(
-                "other.example.com", "test", 10
+                "@requester:example.com","other.example.com", "test", 10
             )
         )
 
@@ -118,9 +119,10 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
 
     def test_search_user_directory_across_federation(self) -> None:
         """Test that the federation client correctly handles searching across multiple servers."""
+
         # Mock the user_directory_search method to return different results for different servers
         async def mock_user_directory_search(
-            destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, limit: int
         ) -> JsonDict:
             if destination == "server1.example.com":
                 return {
@@ -154,7 +156,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                ["server1.example.com", "server2.example.com"], "test", 10
+                "@requester:example.com",["server1.example.com", "server2.example.com"], "test", 10
             )
         )
 
@@ -180,9 +182,10 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
 
     def test_search_user_directory_across_federation_with_limit(self) -> None:
         """Test that the federation client correctly applies limits when searching across multiple servers."""
+
         # Mock the user_directory_search method to return many results
         async def mock_user_directory_search(
-            destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, limit: int
         ) -> JsonDict:
             return {
                 "limited": False,
@@ -203,7 +206,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method with a limit of 5
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                ["server1.example.com", "server2.example.com"], "test", 5
+                "@requester:example.com",["server1.example.com", "server2.example.com"], "test", 5
             )
         )
 
@@ -216,7 +219,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         # Call the federation client method with an empty destination list
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                [], "test", 10
+                "@requester:example.com",[], "test", 10
             )
         )
 
@@ -227,15 +230,13 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
         """Test that the federation client handles server errors correctly."""
         # Mock the _try_destination_list method to return None (indicating all servers failed)
         self.federation_client.user_directory_search = AsyncMock(
-            side_effect=HttpResponseException(
-                500, "Internal Server Error", b"{}"
-            )
+            side_effect=HttpResponseException(500, "Internal Server Error", b"{}")
         )
 
         # Call the federation client method
         result = self.get_success(
             self.federation_client.search_user_directory_across_federation(
-                ["server1.example.com", "server2.example.com"], "test", 10
+                "@requester:example.com",["server1.example.com", "server2.example.com"], "test", 10
             )
         )
 
@@ -245,7 +246,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
     def test_user_directory_search_with_token(self) -> None:
         """Test that the user directory search endpoint correctly handles search tokens."""
         # Create a user
-        user_id = self.register_user("user", "password")
+        self.register_user("user", "password")
         access_token = self.login("user", "password")
 
         # Mock the user_directory_handler's search_users method
@@ -282,7 +283,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
     def test_user_directory_search_with_token_federated_results(self) -> None:
         """Test that the user directory search endpoint correctly handles federated results with search tokens."""
         # Create a user
-        user_id = self.register_user("user", "password")
+        self.register_user("user", "password")
         access_token = self.login("user", "password")
 
         # Mock the user_directory_handler's get_federated_search_results method
@@ -321,7 +322,7 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
     def test_user_directory_search_with_token_no_results(self) -> None:
         """Test that the user directory search endpoint correctly handles no federated results."""
         # Create a user
-        user_id = self.register_user("user", "password")
+        self.register_user("user", "password")
         access_token = self.login("user", "password")
 
         # Mock the user_directory_handler's get_federated_search_results method
@@ -341,4 +342,4 @@ class FederationClientUserDirectoryTestCase(unittest.FederatingHomeserverTestCas
             # Check that the response is empty
             self.assertEqual(channel.code, 200)
             self.assertEqual(len(channel.json_body.get("results", [])), 0)
-            self.assertFalse(channel.json_body.get("limited", False)) 
+            self.assertFalse(channel.json_body.get("limited", False))

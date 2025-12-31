@@ -52,7 +52,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import JsonDict, get_domain_from_id
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -890,6 +890,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
 
     Request:
     {
+        "requester": "@user:example.com",
         "search_term": "search query",
         "limit": 10
     }
@@ -907,6 +908,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
         ]
     }
     """
+
     PATH = "/user_directory/search"
     PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4258"
     RATELIMIT = True
@@ -914,6 +916,10 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     async def on_POST(
         self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
     ) -> Tuple[int, JsonDict]:
+        requester = content.get("requester")
+        if requester is None or get_domain_from_id(requester) == origin:
+            raise SynapseError(400, "Missing or invalid requester", Codes.BAD_JSON)
+
         search_term = content.get("search_term")
         if not search_term or not isinstance(search_term, str):
             raise SynapseError(400, "Missing or invalid search_term", Codes.BAD_JSON)
@@ -921,7 +927,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
         limit = content.get("limit", 10)
         if not isinstance(limit, int):
             raise SynapseError(400, "Invalid limit", Codes.BAD_JSON)
-        
+
         limit = max(min(limit, 50), 0)  # Clamp limit between 0 and 50
 
         return await self.handler.on_user_directory_search_request(

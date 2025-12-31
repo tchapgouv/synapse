@@ -25,8 +25,6 @@ from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     Any,
-    Awaitable,
-    Callable,
     Dict,
     List,
     Optional,
@@ -49,25 +47,28 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.state_deltas import StateDelta
-from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import JsonDict, UserID
+from synapse.types import UserID
+from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none
-from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
-    from synapse.server import HomeServer
     from typing import TypedDict
+
+    from synapse.server import HomeServer
 
     class UserDirectorySearchResult(TypedDict, total=False):
         limited: bool
         results: List[Dict[str, Any]]
         search_token: str
 
+
 # Use the existing SearchResult type from the storage module
-from synapse.storage.databases.main.user_directory import SearchResult as StorageSearchResult
+from synapse.storage.databases.main.user_directory import (
+    SearchResult as StorageSearchResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,9 @@ class UserDirectoryHandler(StateDeltasHandler):
         self._hs = hs
         self.federation_client = hs.get_federation_client()
         self.state = hs.get_state_handler()
+        self.federation_domain_whitelist = (
+            hs.config.federation.federation_domain_whitelist
+        )
 
         # The current position in the current_state_delta stream
         self.pos: Optional[int] = None
@@ -157,7 +161,10 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Cache for storing search results with tokens
         self.search_response_cache: ResponseCache = ResponseCache(
-            clock=hs.get_clock(), name="user_directory_search", server_name=self.server_name, timeout_ms=60 * 60 * 1000
+            clock=hs.get_clock(),
+            name="user_directory_search",
+            server_name=self.server_name,
+            timeout_ms=60 * 60 * 1000,
         )
 
         if self.update_user_directory:
@@ -177,7 +184,11 @@ class UserDirectoryHandler(StateDeltasHandler):
             )
 
     async def search_users(
-        self, user_id: str, search_term: str, limit: int, search_token: Optional[str] = None
+        self,
+        user_id: str,
+        search_term: str,
+        limit: int,
+        search_token: Optional[str] = None,
     ) -> StorageSearchResult:
         """Searches for users in directory
 
@@ -230,7 +241,9 @@ class UserDirectoryHandler(StateDeltasHandler):
             # We need to create a new dict to avoid modifying the original
             results_with_token = dict(results)
             results_with_token["search_token"] = search_token
-            results_with_token["limited"] = True  # Set limited to true to indicate more results may be available
+            results_with_token["limited"] = (
+                True  # Set limited to true to indicate more results may be available
+            )
             return cast(StorageSearchResult, results_with_token)
 
         return results
@@ -254,17 +267,11 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Define the function to get federated results
         async def _get_federated_results() -> Dict[str, Any]:
-            # Get the list of rooms the user is in
-            # We need to get the room IDs from the user's membership
-            room_ids = await self.store.get_rooms_for_user(user_id)
-            
-            # Get the list of servers in those rooms
-            servers_in_rooms = set()
-            for room_id in room_ids:
-                # Get the current hosts in the room
-                hosts = await self.store.get_current_hosts_in_room(room_id)
-                servers_in_rooms.update(hosts)
-            
+            # Get the list of servers from federation
+            if not self.federation_domain_whitelist:
+                return {"limited": False, "results": []}
+            servers_in_rooms = set(self.federation_domain_whitelist.keys())
+
             # Remove our own server
             servers_in_rooms.discard(self._hs.hostname)
             servers = list(servers_in_rooms)
@@ -274,16 +281,16 @@ class UserDirectoryHandler(StateDeltasHandler):
                 return {"limited": False, "results": []}
 
             # Query federated servers
-            federated_results = await self.federation_client.search_user_directory_across_federation(
-                servers, search_term, limit
+            federated_results = (
+                await self.federation_client.search_user_directory_across_federation(
+                    user_id, servers, search_term, limit
+                )
             )
 
             return federated_results
 
         # Use the wrap method to get or compute the results
-        return await self.search_response_cache.wrap(
-            cache_key, _get_federated_results
-        )
+        return await self.search_response_cache.wrap(cache_key, _get_federated_results)
 
     def _generate_search_token(self) -> str:
         """Generate a unique search token.

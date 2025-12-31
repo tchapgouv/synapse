@@ -41,12 +41,12 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
-    overload,
 )
 
 import attr
 from prometheus_client import Counter
+
+from twisted.internet import defer
 
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import (
@@ -75,6 +75,7 @@ from synapse.federation.federation_base import (
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
+from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
@@ -82,14 +83,6 @@ from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATI
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.retryutils import NotRetryingDestination
-from synapse.logging.context import make_deferred_yieldable
-from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
-from synapse.types import JsonDict, UserID
-from synapse.util import unwrapFirstError
-from synapse.util.async_helpers import timeout_deferred
-from synapse.util.caches.response_cache import ResponseCache
-from twisted.internet import defer
-from twisted.internet.interfaces import IReactorTime
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -1992,11 +1985,12 @@ class FederationClient(FederationBase):
         return filtered_statuses, filtered_failures
 
     async def user_directory_search(
-        self, destination: str, search_term: str, limit: int = 10
+        self, requester: str, destination: str, search_term: str, limit: int = 10
     ) -> JsonDict:
         """Search for users in the user directory of a remote server.
 
         Args:
+            requester: The user that initiated the search.
             destination: The server to query.
             search_term: The search term to look for.
             limit: Maximum number of results to return.
@@ -2010,7 +2004,7 @@ class FederationClient(FederationBase):
 
         try:
             response = await self.transport_layer.user_directory_search(
-                destination, search_term, limit
+                requester, destination, search_term, limit
             )
             return response
         except HttpResponseException as e:
@@ -2021,11 +2015,16 @@ class FederationClient(FederationBase):
             raise
 
     async def search_user_directory_across_federation(
-        self, destinations: Collection[str], search_term: str, limit: int = 10
+        self,
+        requester: str,
+        destinations: Collection[str],
+        search_term: str,
+        limit: int = 10,
     ) -> JsonDict:
         """Search for users across multiple federated servers.
 
         Args:
+            requester: The user that initiated the search.
             destinations: The servers to query.
             search_term: The search term to look for.
             limit: Maximum number of results to return per server.
@@ -2050,7 +2049,9 @@ class FederationClient(FederationBase):
             if not self._is_mine_server_name(destination):
                 # Convert coroutine to Deferred
                 deferred = defer.ensureDeferred(
-                    self.user_directory_search(destination, search_term, limit)
+                    self.user_directory_search(
+                        requester, destination, search_term, limit
+                    )
                 )
                 query_tasks.append(deferred)
 
@@ -2072,11 +2073,13 @@ class FederationClient(FederationBase):
             except Exception:
                 # If something goes wrong, we still want to return what we have
                 logger.exception("Error searching user directory across federation")
-        
+
         # Sort results by display name (case insensitive)
         combined_results.sort(
             key=lambda user: (
-                user.get("display_name", "").lower() if user.get("display_name") else "",
+                user.get("display_name", "").lower()
+                if user.get("display_name")
+                else "",
                 user.get("user_id", ""),
             )
         )

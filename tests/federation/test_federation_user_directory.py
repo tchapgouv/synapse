@@ -15,18 +15,20 @@
 # <http://www.apache.org/licenses/LICENSE-2.0>.
 #
 #
+import logging
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
 
-import logging
 logger = logging.getLogger(__name__)
+
 
 class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCase):
     """Tests for the federation user directory search servlet."""
@@ -38,7 +40,7 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
         room.register_servlets,
         user_directory.register_servlets,
     ]
-    
+
     # Initialize instance variables to avoid linter errors
     federation_server = None
     user_directory_handler = None
@@ -68,7 +70,7 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
         channel = self.make_signed_federation_request(
             "POST",
             "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
-            content={"search_term": "test", "limit": 10},
+            content={"requester": "@user:test", "search_term": "test", "limit": 10},
         )
 
         # Check that the response is correct
@@ -90,7 +92,7 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
 
         # Check that the response is an error
         self.assertEqual(channel.code, 400)
-        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON") 
+        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
 
     @override_config({"experimental_features": {"msc4258_enabled": True}})
     def test_federation_user_directory_search_servlet_no_results(self) -> None:
@@ -99,7 +101,7 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
         channel = self.make_signed_federation_request(
             "POST",
             "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
-            content={"search_term": "nonexistent", "limit": 10},
+            content={"requester": "@user:test", "search_term": "nonexistent", "limit": 10},
         )
 
         # Check that the response is correct
@@ -110,12 +112,12 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
 
     def test_federation_user_directory_search_servlet_msc4258_disabled(self) -> None:
         """Test that the federation user directory search servlet rejects requests when MSC4258 is disabled."""
-        logger.error(f"msc4258_enabled: {self.hs.config.experimental.msc4258_enabled}")
+        logger.error("msc4258_enabled: %s", self.hs.config.experimental.msc4258_enabled)
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
             "POST",
             "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
-            content={"search_term": "test", "limit": 10},
+            content={"requester": "@user:test", "search_term": "test", "limit": 10},
         )
 
         # Check that the response is an error
