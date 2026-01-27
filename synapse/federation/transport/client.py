@@ -884,7 +884,7 @@ class TransportLayerClient:
         Returns:
             The search results.
         """
-        path = _create_path(FEDERATION_V2_PREFIX + "/v1", "/user_directory/search")
+        path = _create_path(FEDERATION_V2_PREFIX, "/user_directory/search")
         content = {"requester": requester, "search_term": search_term, "limit": limit}
         return await self.client.post_json(destination, path=path, data=content)
 

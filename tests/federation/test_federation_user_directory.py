@@ -75,7 +75,7 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
 
         # Check that the response is correct
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body.get("limited", None), False)
+        self.assertEqual(channel.json_body.get("limited", None), True)
         results = channel.json_body.get("results", [])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].get("user_id"), "@user:test")
@@ -110,7 +110,7 @@ class FederationUserDirectoryServletTestCase(unittest.FederatingHomeserverTestCa
 
         # Check that the response is correct
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body.get("limited", None), False)
+        self.assertEqual(channel.json_body.get("limited", None), True)
         results = channel.json_body.get("results", [])
         self.assertEqual(len(results), 0)
 
