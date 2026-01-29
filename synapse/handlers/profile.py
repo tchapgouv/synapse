@@ -22,6 +22,8 @@ import logging
 import random
 from typing import TYPE_CHECKING
 
+from twisted.internet.defer import CancelledError
+
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
     AuthError,
@@ -635,6 +637,8 @@ class ProfileHandler:
         assert task.resource_id
         assert task.params
 
+        print("_update_join_states_task begin")
+
         target_user = UserID.from_string(task.resource_id)
         room_ids = sorted(await self.store.get_rooms_for_user(target_user.to_string()))
 
@@ -664,6 +668,8 @@ class ProfileHandler:
                     "join",  # We treat a profile update like a join.
                     ratelimit=False,  # Try to hide that these events aren't atomic.
                 )
+            except CancelledError as e:
+                raise e
             except Exception as e:
                 logger.warning(
                     "Failed to update join event for room %s - %s", room_id, str(e)
@@ -671,6 +677,8 @@ class ProfileHandler:
             await self._task_scheduler.update_task(
                 task.id, result={"last_room_id": last_room_id}
             )
+
+        print("_update_join_states_task finished")
 
         return TaskStatus.COMPLETE, None, None
 
