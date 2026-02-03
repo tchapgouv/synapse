@@ -637,8 +637,6 @@ class ProfileHandler:
         assert task.resource_id
         assert task.params
 
-        print("_update_join_states_task begin")
-
         target_user = UserID.from_string(task.resource_id)
         room_ids = sorted(await self.store.get_rooms_for_user(target_user.to_string()))
 
@@ -677,8 +675,6 @@ class ProfileHandler:
             await self._task_scheduler.update_task(
                 task.id, result={"last_room_id": last_room_id}
             )
-
-        print("_update_join_states_task finished")
 
         return TaskStatus.COMPLETE, None, None
 

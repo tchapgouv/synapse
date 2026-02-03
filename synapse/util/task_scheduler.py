@@ -366,7 +366,6 @@ class TaskScheduler:
     def _launch_scheduled_tasks(self) -> None:
         """Retrieve and launch scheduled tasks that should be running at this time."""
         # Don't bother trying to launch new tasks if we're already at capacity.
-        print("_launch_scheduled_tasks")
         if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:
             return
 
@@ -376,24 +375,19 @@ class TaskScheduler:
         self._launching_new_tasks = True
 
         async def inner() -> None:
-            print("_launch_scheduled_tasks innner")
             try:
-                print(await self.get_tasks())
                 for task in await self.get_tasks(
                     statuses=[TaskStatus.ACTIVE],
                     limit=self.MAX_CONCURRENT_RUNNING_TASKS,
                 ):
-                    print("launch ACTIVE")
                     # _launch_task will ignore tasks that we're already running, and
                     # will also do nothing if we're already at the maximum capacity.
                     await self._launch_task(task)
-                print(f"now {self._clock.time_msec()}")
                 for task in await self.get_tasks(
                     statuses=[TaskStatus.SCHEDULED],
                     max_timestamp=self._clock.time_msec(),
                     limit=self.MAX_CONCURRENT_RUNNING_TASKS,
                 ):
-                    print("launch SCHEDULED")
                     await self._launch_task(task)
 
             finally:
@@ -447,8 +441,6 @@ class TaskScheduler:
             task: the task to launch
         """
         assert self._run_background_tasks
-
-        print(f"launch {task}")
 
         if task.action not in self._actions:
             raise Exception(

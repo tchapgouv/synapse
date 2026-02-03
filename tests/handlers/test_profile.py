@@ -37,8 +37,8 @@ from synapse.types import JsonDict, UserID
 from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
-
 from synapse.util.task_scheduler import TaskScheduler, TaskStatus
+
 from tests import unittest
 from tests.server import get_clock
 
@@ -131,7 +131,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
     def test_update_room_membership_on_set_displayname(self) -> None:
-        """Test that the update_join_states task updates membership events in rooms."""
+        """Test that `set_displayname` updates membership events in rooms."""
 
         self.get_success(
             self.handler.set_displayname(
@@ -177,7 +177,9 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         original_update_membership = self.hs.get_room_member_handler().update_membership
 
         async def slow_update_membership(handler, *args, **kwargs) -> tuple[str, int]:
+            print("before sleep")
             await self.clock.sleep(Duration(milliseconds=10))
+            print("after sleep")
             return await original_update_membership(handler, *args, **kwargs)
 
         with patch.object(
@@ -199,7 +201,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
 
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)))
+            ensureDeferred(self.clock.sleep(Duration(milliseconds=20)))
+
+            # Let's be sure we are over the delay introduced by slow_update_membership
+            # self.get_success(self.clock.sleep(Duration(milliseconds=20)))
+            self.reactor.advance(100)
+            # self.get_success(self.clock.sleep(Duration(milliseconds=20)))
+            self.pump()
+            time.sleep(0.1)
 
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
@@ -259,10 +268,17 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
 
-            cancelled_task = self.get_success(self.task_scheduler.get_tasks(actions=["update_join_states"], statuses=[TaskStatus.CANCELLED]))[0]
+            cancelled_task = self.get_success(
+                self.task_scheduler.get_tasks(
+                    actions=["update_join_states"], statuses=[TaskStatus.CANCELLED]
+                )
+            )[0]
 
-            ensureDeferred(self.task_scheduler.update_task(cancelled_task.id, status=TaskStatus.ACTIVE))
-
+            ensureDeferred(
+                self.task_scheduler.update_task(
+                    cancelled_task.id, status=TaskStatus.ACTIVE
+                )
+            )
 
             print("gggg")
 
