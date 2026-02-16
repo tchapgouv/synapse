@@ -5,7 +5,7 @@ name: Build Tchap release artifacts
 on:
   # we build on PRs and develop to (hopefully) get early warning
   # of things breaking (but only build one set of debs). PRs skip
-  # building wheels on macOS & ARM.
+  # building wheels on ARM.
   pull_request:
   push:
     branches: [tchap, develop_tchap]
@@ -29,8 +29,8 @@ jobs:
     name: "Calculate list of debian distros"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
           python-version: "3.x"
       - id: set-distros
@@ -54,7 +54,7 @@ jobs:
     strategy:
       matrix:
 ### Deactivate macos pipeline : not required for Tchap Synapse ###
-        os: [ubuntu-22.04]
+        os: [ubuntu-24.04]
 ### Deactivate aarch64 pipeline : not required for Tchap Synapse ###
         arch: [x86_64]
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
@@ -63,43 +63,38 @@ jobs:
           - ${{ startsWith(github.ref, 'refs/pull/') }}
 
         exclude:
-          # Don't build macos wheels on PR CI.
-          - is_pr: true
-            os: "macos-13"
-          - is_pr: true
-            os: "macos-14"
           # Don't build aarch64 wheels on PR CI.
           - is_pr: true
             os: "ubuntu-24.04-arm"
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
           # setup-python@v4 doesn't impose a default python version. Need to use 3.x
           # here, because `python` on osx points to Python 2.7.
           python-version: "3.x"
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.0.0
+        run: python -m pip install cibuildwheel==3.2.1
 
       - name: Only build a single wheel on PR
         if: startsWith(github.ref, 'refs/pull/')
-        run: echo "CIBW_BUILD="cp39-manylinux_*"" >> $GITHUB_ENV
+        run: echo "CIBW_BUILD="cp310-manylinux_*"" >> $GITHUB_ENV
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
           ### Deactivate pipeline : not required for Tchap Synapse ###
-          CIBW_SKIP: cp36-* cp37-* cp38-* pp3*-* *i686* *musl*
+          CIBW_SKIP: cp36-* cp37-* cp38-* cp39-* pp3*-* *i686* *musl*
           ### Deactivate version : not required for Tchap Synapse ###
-          CIBW_BUILD: cp39-manylinux_x86_64
+          CIBW_BUILD: cp310-manylinux_x86_64
           # Skip testing for platforms which various libraries don't have wheels
           # for, and so need extra build deps.
           CIBW_TEST_SKIP: pp3*-* *i686* *musl*
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Wheel-${{ matrix.os }}
           path: ./wheelhouse/*.whl
@@ -110,8 +105,8 @@ jobs:
     if: ${{ !startsWith(github.ref, 'refs/pull/') }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
           python-version: "3.10"
 
@@ -120,7 +115,7 @@ jobs:
       - name: Build sdist
         run: python -m build --sdist
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Sdist
           path: dist/*.tar.gz
@@ -137,18 +132,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-### Deactivate debs archiving : not required for Tchap Synapse ###
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+### Deactivate Build a tarball for the debs : not required for Tchap Synapse ###
+#      - name: Build a tarball for the debs
+#        We need to merge all the debs uploads into one folder, then compress
+#        that.
+#        run: |
+#          mkdir debs
+#          mv debs*/* debs/
+#          tar -cvJf debs.tar.xz debs
       - name: Attach to release
-        # Pinned to work around https://github.com/softprops/action-gh-release/issues/445
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v0.1.15
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          files: |
-            Sdist/*
-            Wheel*/*
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            Sdist/* \
+            Wheel*/* \
+            --repo ${{ github.repository }}
 ### Deactivate debs archiving : not required for Tchap Synapse ###
-#            debs.tar.xz
-          # mark it as a prerelease if the tag contains 'rc'.
-          prerelease: ${{ contains(github.ref, 'rc') }}
+#            debs.tar.xz \
+
