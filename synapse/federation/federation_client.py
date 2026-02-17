@@ -42,6 +42,8 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
+from twisted.internet import defer
+
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import (
     CodeMessageException,
@@ -69,6 +71,7 @@ from synapse.federation.federation_base import (
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
+from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
@@ -1976,6 +1979,104 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_search(
+        self, requester: str, destination: str, search_term: str, limit: int = 10
+    ) -> JsonDict:
+        """Search for users in the user directory of a remote server.
+        Args:
+            requester: The user that initiated the search.
+            destination: The server to query.
+            search_term: The search term to look for.
+            limit: Maximum number of results to return.
+        Returns:
+            The search results containing a list of users matching the search term.
+        """
+        try:
+            response = await self.transport_layer.user_directory_search(
+                requester, destination, search_term, limit
+            )
+            return response
+        except HttpResponseException as e:
+            # If the remote server doesn't support this endpoint, return empty results
+            if e.code in (404, 405):
+                return {"limited": False, "results": []}
+            # Otherwise, something else went wrong, so just re-raise
+            raise
+
+    async def search_user_directory_across_federation(
+        self,
+        requester: str,
+        destinations: Collection[str],
+        search_term: str,
+        limit: int = 10,
+    ) -> JsonDict:
+        """Search for users across multiple federated servers.
+        Args:
+            requester: The user that initiated the search.
+            destinations: The servers to query.
+            search_term: The search term to look for.
+            limit: Maximum number of results to return per server.
+        Returns:
+            Combined search results from all servers.
+        """
+
+        if not destinations:
+            return {"limited": False, "results": []}
+
+        # Query each server individually and collect results
+        combined_results = []
+        limited = False
+
+        # Create a list of deferreds to query each server
+        query_tasks = []
+        for destination in destinations:
+            if not self._is_mine_server_name(destination):
+                # Convert coroutine to Deferred
+                deferred = defer.ensureDeferred(
+                    self.user_directory_search(
+                        requester, destination, search_term, limit
+                    )
+                )
+                query_tasks.append(deferred)
+
+        # Execute all queries in parallel
+        if query_tasks:
+            try:
+                server_results = await make_deferred_yieldable(
+                    defer.gatherResults(
+                        query_tasks,
+                        consumeErrors=True,
+                    )
+                )
+
+                # Process results from each server
+                for result in server_results:
+                    if result.get("limited", False):
+                        limited = True
+                    combined_results.extend(result.get("results", []))
+            except Exception as e:
+                # If something goes wrong, we still want to return what we have
+                logger.exception(
+                    "Error searching user directory across federation : %s", e
+                )
+
+        # Sort results by display name (case insensitive)
+        combined_results.sort(
+            key=lambda user: (
+                user.get("display_name", "").lower()
+                if user.get("display_name")
+                else "",
+                user.get("user_id", ""),
+            )
+        )
+
+        # Limit the total number of results
+        if len(combined_results) > limit:
+            combined_results = combined_results[:limit]
+            limited = True
+
+        return {"limited": limited, "results": combined_results}
 
     async def federation_download_media(
         self,

@@ -54,7 +54,13 @@ class UserDirectorySearchRestServlet(RestServlet):
         )
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
-        """Searches for users in directory
+        """Searches for users in directory, including federated results
+
+        Request:
+            {
+                "search_term": "search query",
+                "limit": 10,
+            }
 
         Returns:
             dict of the form::
@@ -80,7 +86,7 @@ class UserDirectorySearchRestServlet(RestServlet):
 
         body = parse_json_object_from_request(request)
 
-        limit = int(body.get("limit", 10))
+        limit = int(body.get("limit", 5))
         limit = max(min(limit, 50), 0)
 
         try:
@@ -88,12 +94,27 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        results = await self.user_directory_handler.search_users(
+        # Get local results first
+        local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
 
-        return 200, results
+        # Try to get federated results from cache
+        federated_results = (
+            await self.user_directory_handler.get_federated_search_results(
+                user_id, search_term, limit
+            )
+        )
+
+        return 200, merge_search_results(local_results, federated_results)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserDirectorySearchRestServlet(hs).register(http_server)
+
+
+def merge_search_results(a: JsonMapping, b: JsonMapping) -> JsonMapping:
+    return {
+        "limited": a["limited"] or b["limited"],
+        "results": a["results"] + b["results"],
+    }
