@@ -286,7 +286,13 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         # Ensure that the event is frozen, to make sure that the module is not tempted
         # to try to modify it. Any attempt to modify it at this point will invalidate
         # the hashes and signatures.
-        event.freeze()
+        #:tchap:
+        # unable to create the event once it is frozen
+        # quick fix, do not freeze the event before passing it to the external modules
+        # not ideal but for tchap we control what we do in the module
+        # should  
+        #event.freeze()
+        #:tchap:end
 
         for callback in self._check_event_allowed_callbacks:
             try:
