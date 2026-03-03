@@ -401,6 +401,7 @@ class HomeserverTestCase(TestCase):
         # Honour the `use_frozen_dicts` config option. We have to do this
         # manually because this is taken care of in the app `start` code, which
         # we don't run. Plus we want to reset it on tearDown.
+        print(f"unittest: USE_FROZEN_DICTS={self.hs.config.server.use_frozen_dicts}")
         events.USE_FROZEN_DICTS = self.hs.config.server.use_frozen_dicts
 
         if self.hs is None:
@@ -870,6 +871,7 @@ class HomeserverTestCase(TestCase):
         user: UserID,
         soft_failed: bool = False,
         prev_event_ids: list[str] | None = None,
+        content: dict[str, Any] | None = None,
     ) -> str:
         """
         Create and send an event.
@@ -878,6 +880,7 @@ class HomeserverTestCase(TestCase):
             soft_failed: Whether to create a soft failed event or not
             prev_event_ids: Explicitly set the prev events,
                 or if None just use the default
+            content: Event content to send, or if None use a default
 
         Returns:
             The new event's ID.
@@ -892,7 +895,8 @@ class HomeserverTestCase(TestCase):
                     "type": EventTypes.Message,
                     "room_id": room_id,
                     "sender": user.to_string(),
-                    "content": {"body": secrets.token_hex(), "msgtype": "m.text"},
+                    "content": content
+                    or {"body": secrets.token_hex(), "msgtype": "m.text"},
                 },
                 prev_event_ids=prev_event_ids,
             )

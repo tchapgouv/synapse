@@ -13,12 +13,16 @@
 #
 #
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, StrictStr, StringConstraints
+from pydantic.config import ExtraValues
+from typing_extensions import Self
 
 from synapse.api.errors import SynapseError
+from synapse.events import USE_FROZEN_DICTS
 from synapse.types import EventID
+from synapse.util.frozenutils import unfreeze
 
 
 class ParseModel(BaseModel):
@@ -46,6 +50,31 @@ class ParseModel(BaseModel):
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+
+    @classmethod
+    def model_validate(
+        cls,
+        obj: Any,
+        *,
+        strict: bool | None = None,
+        extra: ExtraValues | None = None,
+        from_attributes: bool | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        print(f"model_validate: USE_FROZEN_DICTS={USE_FROZEN_DICTS}")
+        if USE_FROZEN_DICTS:
+            obj = unfreeze(obj)
+        return super().model_validate(
+            obj,
+            strict=strict,
+            extra=extra,
+            from_attributes=from_attributes,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
 
 
 def validate_event_id_v1_and_2(value: str) -> str:

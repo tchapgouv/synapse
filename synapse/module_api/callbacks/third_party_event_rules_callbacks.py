@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from twisted.internet.defer import CancelledError
 
 from synapse.api.errors import ModuleFailedException, SynapseError
-from synapse.events import EventBase
+from synapse.events import USE_FROZEN_DICTS, EventBase
 from synapse.events.snapshot import UnpersistedEventContextBase
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import Requester, StateMap
@@ -286,7 +286,8 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         # Ensure that the event is frozen, to make sure that the module is not tempted
         # to try to modify it. Any attempt to modify it at this point will invalidate
         # the hashes and signatures.
-        event.freeze()
+        if USE_FROZEN_DICTS:
+            event.freeze()
 
         for callback in self._check_event_allowed_callbacks:
             try:
@@ -316,6 +317,9 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 return res, None
             elif isinstance(replacement_data, dict):
                 return True, replacement_data
+
+        # if USE_FROZEN_DICTS:
+        #     event.unfreeze()
 
         return True, None
 
