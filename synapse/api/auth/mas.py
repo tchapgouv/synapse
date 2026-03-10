@@ -27,8 +27,8 @@ from pydantic import (
 
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
-    Codes,#:tchap:
     AuthError,
+    Codes,  #:tchap:
     HttpResponseException,
     InvalidClientTokenError,
     SynapseError,
@@ -106,7 +106,7 @@ class MasDelegatedAuth(BaseAuth):
         self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._config = hs.config.mas
-        self._account_validity_handler = hs.get_account_validity_handler()#:tchap:
+        self._account_validity_handler = hs.get_account_validity_handler()  #:tchap:
 
         self._http_client = hs.get_proxied_http_client()
         self._rust_http_client = HttpClient(
