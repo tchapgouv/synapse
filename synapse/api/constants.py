@@ -69,7 +69,7 @@ NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION = 10
 #
 # in short, we somewhat arbitrarily limit requests to 200 * 64K (about 12.5M)
 #
-MAX_REQUEST_SIZE = 200 * MAX_PDU_SIZE
+MAX_REQUEST_SIZE = 1000 * MAX_PDU_SIZE
 
 # Max/min size of ints in canonical JSON
 CANONICALJSON_MAX_INT = (2**53) - 1
