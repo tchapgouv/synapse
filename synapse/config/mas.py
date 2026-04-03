@@ -20,6 +20,7 @@ from pydantic import (
     Field,
     FilePath,
     StrictBool,
+    StrictInt,  #:tchap:
     StrictStr,
     ValidationError,
     model_validator,
@@ -39,6 +40,7 @@ class MasConfigModel(ParseModel):
     secret: StrictStr | None = Field(default=None)
     # We set `strict=False` to allow `str` instances.
     secret_path: FilePath | None = Field(default=None, strict=False)
+    token_introspection_cache_timeout: StrictInt = Field(default=120_000)  #:tchap:
 
     @model_validator(mode="after")
     def verify_secret(self) -> Self:
@@ -84,6 +86,9 @@ class MasConfig(Config):
         self.endpoint = parsed.endpoint
         self._secret = parsed.secret
         self._secret_path = parsed.secret_path
+        self.token_introspection_cache_timeout = (
+            parsed.token_introspection_cache_timeout
+        )  #:tchap:
 
         self.check_config_conflicts(self.root)
 

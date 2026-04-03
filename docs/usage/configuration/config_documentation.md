@@ -657,12 +657,15 @@ This setting has the following sub-options:
 
 * `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
 
+* `token_introspection_cache_timeout` (integer|120_000): timeout of th token introspection cache in milliseconds. token introspection cache remembers what users/devices are represented by which access tokens in order to reduce overall system load.
+
 Example configuration:
 ```yaml
 matrix_authentication_service:
   enabled: true
   secret: someverysecuresecret
   endpoint: http://localhost:8080
+  token_introspection_cache_timeout: 120_000
 ```
 ---
 ### `dummy_events_threshold`

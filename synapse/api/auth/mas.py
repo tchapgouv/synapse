@@ -141,7 +141,7 @@ class MasDelegatedAuth(BaseAuth):
             clock=self._clock,
             name="mas_token_introspection",
             server_name=self.server_name,
-            timeout_ms=120_000,
+            timeout_ms=self._config.token_introspection_cache_timeout,  #:tchap:
             # don't log because the keys are access tokens
             enable_logging=False,
         )
