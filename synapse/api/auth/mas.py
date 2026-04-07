@@ -142,7 +142,7 @@ class MasDelegatedAuth(BaseAuth):
             clock=self._clock,
             name="mas_token_introspection",
             server_name=self.server_name,
-            timeout=Duration(minutes=2),
+            timeout=Duration(minutes=20),
             # don't log because the keys are access tokens
             enable_logging=False,
         )
