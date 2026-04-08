@@ -698,6 +698,11 @@ class ServerConfig(Config):
         ):
             raise ConfigError("allowed_avatar_mimetypes must be a list")
 
+        # The events to exclude from join state updates.
+        self.join_states_update_excludes = config.get("join_states_update_excludes", [])
+        if not isinstance(self.join_states_update_excludes, list):
+            raise ConfigError("join_states_update_excludes must be a list")
+
         listeners = config.get("listeners", [])
         if not isinstance(listeners, list):
             raise ConfigError("Expected a list", ("listeners",))

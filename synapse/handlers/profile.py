@@ -88,6 +88,7 @@ class ProfileHandler:
         self.allowed_avatar_mimetypes: list[str] | None = (
             hs.config.server.allowed_avatar_mimetypes
         )
+        self.join_states_update_excludes: set[str] = set(hs.config.server.join_states_update_excludes)
 
         self._is_mine_server_name = hs.is_mine_server_name
 
@@ -718,6 +719,8 @@ class ProfileHandler:
         )
 
         for room_id in room_ids:
+            if room_id in self.join_states_update_excludes:
+                continue
             handler = self.hs.get_room_member_handler()
             try:
                 # Assume the target_user isn't a guest,
