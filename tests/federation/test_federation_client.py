@@ -18,17 +18,18 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
+import time
 from unittest import mock
 from unittest.mock import AsyncMock
 
 import twisted.web.client
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import HttpResponseException
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
+from synapse.logging.context import make_deferred_yieldable
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
@@ -66,6 +67,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
         self.test_room_id = "!room_id"
         self.federation_client = homeserver.get_federation_client()
         self.transport_layer = self.federation_client.transport_layer
+        self.fake_user_directory_search_result = None
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         """Create a homeserver with federation enabled and user directory enabled."""
@@ -344,7 +346,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 }
             ],
         }
-        self.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.transport_layer.user_directory_search = AsyncMock(
+            # type: ignore[method-assign]
             return_value=mock_results
         )
 
@@ -366,7 +369,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
     def test_user_directory_search_endpoint_not_found(self) -> None:
         """Test that the federation client handles 404 responses correctly."""
         # Mock the transport layer to raise a 404 error
-        self.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.transport_layer.user_directory_search = AsyncMock(
+            # type: ignore[method-assign]
             side_effect=HttpResponseException(
                 404, "Not Found", b'{"errcode": "M_NOT_FOUND"}'
             )
@@ -414,7 +418,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
             else:
                 return {"limited": False, "results": []}
 
-        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.federation_client.user_directory_search = AsyncMock(
+            # type: ignore[method-assign]
             side_effect=mock_user_directory_search
         )
 
@@ -467,7 +472,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 ],
             }
 
-        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.federation_client.user_directory_search = AsyncMock(
+            # type: ignore[method-assign]
             side_effect=mock_user_directory_search
         )
 
@@ -500,7 +506,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
     def test_search_user_directory_across_federation_server_error(self) -> None:
         """Test that the federation client handles server errors correctly."""
         # Mock the _try_destination_list method to return None (indicating all servers failed)
-        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.federation_client.user_directory_search = AsyncMock(
+            # type: ignore[method-assign]
             side_effect=HttpResponseException(500, "Internal Server Error", b"{}")
         )
 
@@ -516,3 +523,86 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Check that the result is an empty result set
         self.assertEqual(result, {"limited": False, "results": []})
+
+    async def test_search_user_directory_waits_for_all_servers(self) -> None:
+
+        d1 = defer.Deferred()
+        d2 = defer.Deferred()
+
+        async def mock_user_directory_search(requester, destination, search_term,
+                                             limit):
+            if destination == "server1.example.com":
+                return await d1
+            elif destination == "server2.example.com":
+                return await d2
+            return {"limited": False, "results": []}
+
+        self.federation_client.user_directory_search = AsyncMock(
+            # type: ignore[method-assign]
+            side_effect=mock_user_directory_search
+        )
+
+        d = defer.ensureDeferred(
+            self.federation_client.search_user_directory_across_federation(
+                "@requester:example.com",
+                ["server1.example.com", "server2.example.com"],
+                "test",
+                10,
+            )
+        )
+
+        # Homeservers have not replied yet
+        self.assertNoResult(d)
+
+        # Homeserver1 replies to the federated search
+        d1.callback(
+            {
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@user1:server1.example.com",
+                        "display_name": "User 1",
+                        "avatar_url": "mxc://example.com/avatar1",
+                    }
+                ],
+            }
+        )
+
+        # Still waiting homeserver2
+        self.assertNoResult(d)
+
+        # Homeserver2 is now replying to the federated search
+        d2.callback(
+            {
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@user2:server2.example.com",
+                        "display_name": "User 2",
+                        "avatar_url": "mxc://example.com/avatar2",
+                    }
+                ],
+            }
+        )
+
+        # Get the result that is now finished
+        result = self.get_success(d)
+
+        self.assertEqual(
+            result,
+            {
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@user1:server1.example.com",
+                        "display_name": "User 1",
+                        "avatar_url": "mxc://example.com/avatar1",
+                    },
+                    {
+                        "user_id": "@user2:server2.example.com",
+                        "display_name": "User 2",
+                        "avatar_url": "mxc://example.com/avatar2",
+                    },
+                ],
+            },
+        )

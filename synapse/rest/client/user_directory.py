@@ -45,6 +45,7 @@ class UserDirectorySearchRestServlet(RestServlet):
         super().__init__()
         self.hs = hs
         self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
         self.user_directory_handler = hs.get_user_directory_handler()
 
         self._per_user_limiter = Ratelimiter(
@@ -60,6 +61,7 @@ class UserDirectorySearchRestServlet(RestServlet):
             {
                 "search_term": "search query",
                 "limit": 10,
+                "search_token": "a1d29g4f73" # Optional, for retrieving more results
             }
 
         Returns:
@@ -73,7 +75,8 @@ class UserDirectorySearchRestServlet(RestServlet):
                             "display_name": <display_name>,
                             "avatar_url": <avatar_url>
                         }
-                    ]
+                    ],
+                    "search_token": <token for retrieving more results>
                 }
         """
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
@@ -86,7 +89,8 @@ class UserDirectorySearchRestServlet(RestServlet):
 
         body = parse_json_object_from_request(request)
 
-        limit = int(body.get("limit", 5))
+        limit = int(body.get("limit", 10))
+        # Not more than 50
         limit = max(min(limit, 50), 0)
 
         try:
@@ -94,27 +98,10 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        # Get local results first
-        local_results = await self.user_directory_handler.search_users(
-            user_id, search_term, limit
-        )
+        search_token = body.get("search_token")
 
-        # Try to get federated results from cache
-        federated_results = (
-            await self.user_directory_handler.get_federated_search_results(
-                user_id, search_term, limit
-            )
-        )
-
-        return 200, merge_search_results(local_results, federated_results)
+        return 200, await self.user_directory_handler.search_users(user_id, search_term, limit, search_token)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserDirectorySearchRestServlet(hs).register(http_server)
-
-
-def merge_search_results(a: JsonMapping, b: JsonMapping) -> JsonMapping:
-    return {
-        "limited": a["limited"] or b["limited"],
-        "results": a["results"] + b["results"],
-    }

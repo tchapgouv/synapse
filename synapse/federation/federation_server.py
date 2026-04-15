@@ -1405,7 +1405,7 @@ class FederationServer(FederationBase):
         dummy_user_id = f"@federation_search:{origin}"
 
         # Perform the search
-        results = await user_directory_handler.search_users(
+        results = await user_directory_handler.search_local_users(
             dummy_user_id, search_term, limit
         )
 

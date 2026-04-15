@@ -206,7 +206,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         Regression test: Test that search terms with colons in them are acceptable.
         """
         u1 = self.register_user("user1", "pass")
-        self.get_success(self.handler.search_users(u1, "haha:paamayim-nekudotayim", 10))
+        self.get_success(self.handler.search_local_users(u1, "haha:paamayim-nekudotayim", 10))
 
     def test_user_not_in_users_table(self) -> None:
         """Unclear how it happens, but on matrix.org we've seen join events
@@ -494,7 +494,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
 
         # Ensure the regular user is publicly visible and searchable.
         self.helper.create_room_as(user, is_public=True, tok=user_token)
-        s = self.get_success(self.handler.search_users(admin_user, user, 10))
+        s = self.get_success(self.handler.search_local_users(admin_user, user, 10))
         self.assertEqual(len(s["results"]), 1)
         self.assertEqual(s["results"][0]["user_id"], user)
 
@@ -505,7 +505,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
                 user, erase_data=False, requester=create_requester(admin_user)
             )
         )
-        s = self.get_success(self.handler.search_users(admin_user, user, 10))
+        s = self.get_success(self.handler.search_local_users(admin_user, user, 10))
         self.assertEqual(s["results"], [])
 
         # Reactivate the user
@@ -520,7 +520,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.helper.create_room_as(user, is_public=True, tok=user_token)
 
         # Check they're searchable.
-        s = self.get_success(self.handler.search_users(admin_user, user, 10))
+        s = self.get_success(self.handler.search_local_users(admin_user, user, 10))
         self.assertEqual(len(s["results"]), 1)
         self.assertEqual(s["results"][0]["user_id"], user)
 
@@ -588,7 +588,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         )
 
         # Alice's display name remains the same in the user directory.
-        search_result = self.get_success(self.handler.search_users(bob, alice, 10))
+        search_result = self.get_success(self.handler.search_local_users(bob, alice, 10))
         self.assertEqual(
             search_result["results"],
             [{"display_name": "alice", "avatar_url": None, "user_id": alice}],
@@ -657,7 +657,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.assertIn((alice, room), public)
 
         # Alice's display name remains the same in the user directory.
-        search_result = self.get_success(self.handler.search_users(bob, alice, 10))
+        search_result = self.get_success(self.handler.search_local_users(bob, alice, 10))
         self.assertEqual(
             search_result["results"],
             [{"display_name": "alice", "avatar_url": None, "user_id": alice}],
@@ -676,7 +676,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         u3 = self.register_user("user3", "pass")
 
         # u1 can't see u2 until they share a private room, or u1 is in a public room.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
         # Get u1 and u2 into a private room.
@@ -693,15 +693,15 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(public_users, set())
 
         # We get one search result when searching for user2 by user1.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
         # We get NO search results when searching for user2 by user3.
-        s = self.get_success(self.handler.search_users(u3, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u3, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
         # We get NO search results when searching for user3 by user1.
-        s = self.get_success(self.handler.search_users(u1, "user3", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user3", 10))
         self.assertEqual(len(s["results"]), 0)
 
         # User 2 then leaves.
@@ -716,10 +716,10 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(public_users, set())
 
         # User1 now gets no search results for any of the other users.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
-        s = self.get_success(self.handler.search_users(u1, "user3", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user3", 10))
         self.assertEqual(len(s["results"]), 0)
 
     def test_joining_private_room_with_excluded_user(self) -> None:
@@ -776,7 +776,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         u2_token = self.login(u2, "pass")
 
         # We do not add users to the directory until they join a room.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
         room = self.helper.create_room_as(u1, is_public=False, tok=u1_token)
@@ -795,7 +795,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(public_users, set())
 
         # We get one search result when searching for user2 by user1.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
         # Kept old spam checker without `requester_id` tests for backwards compatibility.
@@ -809,7 +809,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
 
         # The results do not change:
         # We get one search result when searching for user2 by user1.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
         # Kept old spam checker without `requester_id` tests for backwards compatibility.
@@ -821,7 +821,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         spam_checker._check_username_for_spam_callbacks = [block_all]
 
         # User1 now gets no search results for any of the other users.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
         async def allow_all_expects_requester_id(
@@ -839,7 +839,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
 
         # The results do not change:
         # We get one search result when searching for user2 by user1.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
         # Configure a spam checker that filters all users.
@@ -855,7 +855,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         ]
 
         # User1 now gets no search results for any of the other users.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
     @override_config(
@@ -875,7 +875,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         u2_token = self.login(u2, "pass")
 
         # We do not add users to the directory until they join a room.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 0)
 
         room = self.helper.create_room_as(u1, is_public=False, tok=u1_token)
@@ -894,7 +894,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(public_users, set())
 
         # We get one search result when searching for user2 by user1.
-        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
     def test_initial_share_all_users(self) -> None:
@@ -923,16 +923,16 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
 
         # Despite not sharing a room, search_all_users means we get a search
         # result.
-        s = self.get_success(self.handler.search_users(u1, u3, 10))
+        s = self.get_success(self.handler.search_local_users(u1, u3, 10))
         self.assertEqual(len(s["results"]), 1)
 
         # We can find the other two users
-        s = self.get_success(self.handler.search_users(u1, "user", 10))
+        s = self.get_success(self.handler.search_local_users(u1, "user", 10))
         self.assertEqual(len(s["results"]), 2)
 
         # Registering a user and then searching for them works.
         u4 = self.register_user("user4", "pass")
-        s = self.get_success(self.handler.search_users(u1, u4, 10))
+        s = self.get_success(self.handler.search_local_users(u1, u4, 10))
         self.assertEqual(len(s["results"]), 1)
 
     @override_config(
@@ -981,7 +981,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         # The local searching user searches for the term "user", which other users have
         # in their user id
         results = self.get_success(
-            self.handler.search_users(searching_user, "user", 20)
+            self.handler.search_local_users(searching_user, "user", 20)
         )["results"]
         received_user_id_ordering = [result["user_id"] for result in results]
 
@@ -1041,7 +1041,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         # The local searching user searches for the term "user", which other users have
         # in their user id
         results = self.get_success(
-            self.handler.search_users(searching_user, "user", 20)
+            self.handler.search_local_users(searching_user, "user", 20)
         )["results"]
         received_user_ids = [result["user_id"] for result in results]
 
@@ -1192,7 +1192,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
                 self._add_user_to_room(room_id, RoomVersions.V1, local_user_2)
 
                 results = self.get_success(
-                    self.handler.search_users(searching_user, local_user_1, 20)
+                    self.handler.search_local_users(searching_user, local_user_1, 20)
                 )["results"]
                 received_user_id_ordering = [result["user_id"] for result in results]
                 self.assertSequenceEqual(received_user_id_ordering[:1], [local_user_1])

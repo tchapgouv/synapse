@@ -76,7 +76,7 @@ from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
-from synapse.util.async_helpers import concurrently_execute
+from synapse.util.async_helpers import concurrently_execute, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
@@ -2020,6 +2020,44 @@ class FederationClient(FederationBase):
         Returns:
             Combined search results from all servers.
         """
+        def process_results(server_results: list) -> JsonDict:
+            combined_results = []
+            limited = False
+            try:
+                # Process results from each server
+                for result in server_results:
+                    if result.get("limited", False):
+                        limited = True
+                    combined_results.extend(result.get("results", []))
+            except Exception as e:
+                # If something goes wrong, we still want to return what we have
+                logger.exception(
+                    "Error searching user directory across federation : %s", e
+                )
+                print(e)
+
+            # Sort results by display name (case insensitive)
+            combined_results.sort(
+                key=lambda user: (
+                    user.get("display_name", "").lower()
+                    if user.get("display_name")
+                    else "",
+                    user.get("user_id", ""),
+                )
+            )
+
+            # Limit the total number of results
+            if len(combined_results) > limit:
+                combined_results = combined_results[:limit]
+                limited = True
+
+            return {"limited": limited, "results": combined_results}
+
+        def process_errors(failure):
+            logger.exception(
+                    "Error searching user directory across federation : %s", failure
+                )
+            return {"limited": False, "results": []}
 
         if not destinations:
             return {"limited": False, "results": []}
@@ -2040,43 +2078,14 @@ class FederationClient(FederationBase):
                 )
                 query_tasks.append(deferred)
 
-        # Execute all queries in parallel
-        if query_tasks:
-            try:
-                server_results = await make_deferred_yieldable(
-                    defer.gatherResults(
-                        query_tasks,
-                        consumeErrors=True,
-                    )
-                )
+        if not query_tasks:
+            return defer.succeed({"limited": False, "results": []})
 
-                # Process results from each server
-                for result in server_results:
-                    if result.get("limited", False):
-                        limited = True
-                    combined_results.extend(result.get("results", []))
-            except Exception as e:
-                # If something goes wrong, we still want to return what we have
-                logger.exception(
-                    "Error searching user directory across federation : %s", e
-                )
+        result = await make_deferred_yieldable(
+            gather_results(query_tasks, consumeErrors=True)
+        ).addCallback(process_results).addErrback(process_errors)
+        return result
 
-        # Sort results by display name (case insensitive)
-        combined_results.sort(
-            key=lambda user: (
-                user.get("display_name", "").lower()
-                if user.get("display_name")
-                else "",
-                user.get("user_id", ""),
-            )
-        )
-
-        # Limit the total number of results
-        if len(combined_results) > limit:
-            combined_results = combined_results[:limit]
-            limited = True
-
-        return {"limited": limited, "results": combined_results}
 
     async def federation_download_media(
         self,

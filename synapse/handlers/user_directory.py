@@ -20,10 +20,12 @@
 #
 
 import logging
+import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
+from twisted.internet import defer
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -41,6 +43,7 @@ from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import JsonMapping, UserID
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.caches.ttlcache import TTLCache
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -63,6 +66,9 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 # As long as we have servers to refresh (without backoff), keep adding more
 # every 15 seconds.
 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
+
+# period to cache user search result
+USER_SEARCH_RESULT_CACHE_PERIOD = 30 * 60
 
 
 def calculate_time_of_next_retry(now_ts: int, retry_count: int) -> int:
@@ -137,12 +143,13 @@ class UserDirectoryHandler(StateDeltasHandler):
         # Set of server names.
         self._is_refreshing_remote_profiles_for_servers: set[str] = set()
 
-        # Cache for storing search results with tokens
-        self.search_response_cache: ResponseCache = ResponseCache(
-            clock=hs.get_clock(),
-            name="user_directory_search",
-            server_name=self.server_name,
-            timeout_ms=60 * 60 * 1000,
+        # Cache for storing request
+        self.search_result_by_stream_cache: TTLCache= TTLCache(
+                cache_name="user-directory-search-requests", server_name=self.server_name
+        )
+        # Cache for storing paginated result by search token
+        self.stream_by_search_cache: TTLCache= TTLCache(
+                cache_name="user-directory-search-token", server_name=self.server_name
         )
 
         if self.update_user_directory:
@@ -161,10 +168,16 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self.kick_off_remote_profile_refresh_process,
             )
 
-    async def search_users(
+    async def search_local_users(
         self, user_id: str, search_term: str, limit: int
     ) -> SearchResult:
-        """Searches for users in directory
+        """Searches for local users
+
+        Args:
+            user_id: The user performing the search
+            search_term: The term to search for
+            limit: Maximum number of results to return
+            search_token: Optional token from a previous search to retrieve more results
 
         Returns:
             dict of the form::
@@ -177,7 +190,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                             "display_name": <display_name>,
                             "avatar_url": <avatar_url>
                         }
-                    ]
+                    ],
+                    "search_token": <token for retrieving more results>
                 }
         """
         results = await self.store.search_user_dir(
@@ -195,45 +209,179 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         return results
 
-    async def get_federated_search_results(
-        self, user_id: str, search_term: str, limit: int
+    def search_and_cache_federated_users(
+        self, user_id: str, search_term: str, limit: int, next_search_token: Optional[str] = None, current_search_token: Optional[str] = None
     ) -> JsonMapping:
         """Get search results from federated servers.
         Args:
             user_id: The user performing the search
             search_term: The term to search for
             limit: Maximum number of results to return
+            next_search_token: Optional token from a next search to retrieve more results
+            current_search_token: Optional token from a previous search to retrieve more results
         Returns:
             Search results from federated servers
         """
-        # Use the {user_id}_{search_term} as cache key
-        cache_key = f"{user_id}_{search_term}"
+        def process_result(federated_results):
+            previous_results = False
+            if current_search_token:
+                previous_results = self._get_search_result(user_id, search_term)
+            if previous_results:
+                results = {
+                    "limited": previous_results["limited"] or federated_results["limited"],
+                    "results": previous_results["results"] + federated_results["results"],
+                }
+            else:
+                results = federated_results
 
-        # Define the function to get federated results
-        async def _get_federated_results() -> JsonMapping:
-            # Get the list of servers from federation
-            if not self.federation_domain_whitelist:
-                return {"limited": False, "results": []}
-            authorized_servers = set(self.federation_domain_whitelist.keys())
-            # Remove our own server
-            authorized_servers.discard(self._hs.hostname)
-            servers = list(authorized_servers)
+            self._compute_limited(next_search_token, results)
+            self._update_search_result(user_id, search_term, next_search_token,
+                                       results, limit)
+            return results
 
-            # If no remote servers to query, return empty results
-            if not servers:
-                return {"limited": False, "results": []}
+        # Get the list of servers from federation
+        if not self.federation_domain_whitelist:
+            return {"limited": False, "results": []}
+        authorized_servers = set(self.federation_domain_whitelist.keys())
+        # Remove our own server
+        authorized_servers.discard(self._hs.hostname)
+        servers = list(authorized_servers)
 
-            # Query federated servers
-            federated_results = (
-                await self.federation_client.search_user_directory_across_federation(
-                    user_id, servers, search_term, limit
-                )
+        # If no remote servers to query, return empty results
+        if not servers:
+            results = {"limited": False, "results": []}
+            self._update_search_result(user_id, search_term, next_search_token, results, limit)
+            return results
+
+        # Trigger a federated search on remote servers
+        d = defer.ensureDeferred(
+            self.federation_client.search_user_directory_across_federation(
+                user_id, servers, search_term, limit
             )
+        )
+        d.addCallback(process_result)
+        return self._get_search_result(user_id, search_term)
 
-            return federated_results
+    def _update_stream_id(
+        self, user_id: str, search_term: str, next_search_token: int
+    ) -> None:
+        search_id = f"{user_id}_{search_term}"
+        stream_id = f"{user_id}_{search_term}_{next_search_token}"
+        # TODO: concurrent access to this cache might be trigger issue
+        self.stream_by_search_cache.set(search_id, stream_id, USER_SEARCH_RESULT_CACHE_PERIOD)
 
-        # Use the wrap method to get or compute the results
-        return await self.search_response_cache.wrap(cache_key, _get_federated_results)
+    def _get_stream_id(self, user_id: str, search_term: str) -> bool | str:
+        search_id = f"{user_id}_{search_term}"
+        return self.stream_by_search_cache.get(search_id, False)
+
+    def _get_search_result(self, user_id: str, search_term: str) -> bool | JsonMapping:
+        stream_id = self._get_stream_id(user_id, search_term)
+        # return self.search_result_by_stream_cache.get(stream_id, False)
+        paginated_search_result = self.search_result_by_stream_cache.get(stream_id, False)
+        if not paginated_search_result:
+            return paginated_search_result
+        search_token = int(stream_id.split("_")[-1])
+        return paginated_search_result[search_token - 1]
+
+    def _update_search_result(self, user_id: str, search_term: str,
+                              search_token: int, search_result: JsonMapping, limit: int = 0, is_limited: bool = True) -> None:
+        # Update result with the latest sent token
+        stream_id = self._get_stream_id(user_id, search_term)
+        if not stream_id:
+            self._update_stream_id(user_id, search_term, search_token)
+            stream_id = self._get_stream_id(user_id, search_term)
+
+        if stream_id:
+            # TODO: concurrent access to this cache might be trigger issue
+            paginated_search_result = self.split_search_result_by_stream_id(search_result, limit, is_limited)
+            self.search_result_by_stream_cache.set(stream_id, paginated_search_result,
+                                                   USER_SEARCH_RESULT_CACHE_PERIOD)
+        else:
+            logger.error("No Cached Search Token")
+
+    def split_search_result_by_stream_id(self, search_result: JsonMapping, limit: int, is_limited: bool) -> list[list]:
+        # limited = search_result["limited"]
+        results = search_result["results"]
+        paginated_results = [results[i:i + limit] for i in range(0, len(results), limit)]
+        paginated_search_result = []
+        for index, result_page in enumerate(paginated_results):
+            search_result_page = {}
+            search_result_page["results"] = result_page
+            search_result_page["limited"] = True
+            search_result_page["search_token"] = index + 1
+            paginated_search_result.append(search_result_page)
+        if is_limited:
+            paginated_search_result[len(paginated_results) - 1]["limited"] = False
+            del paginated_search_result[len(paginated_results) - 1]["search_token"]
+        return paginated_search_result
+
+
+
+    def _compute_limited(self, search_token: int, results: JsonMapping) -> None:
+        results["search_token"] = search_token
+        if search_token:
+            results["limited"] = True
+        # TODO : manage when there is no anymore result
+
+    async def search_users(self,  user_id: str, search_term: str, limit: int, search_token: Optional[str] = None) -> JsonMapping:
+        """Searches for users (local and federated)
+
+        Args:
+            user_id: The user performing the search
+            search_term: The term to search for
+            limit: Maximum number of results to return
+            search_token: Optional token from a previous search to retrieve more results
+
+        Returns:
+            dict of the form::
+
+                {
+                    "limited": <bool>,  # whether there were more results or not
+                    "results": [  # Ordered by best match first
+                        {
+                            "user_id": <user_id>,
+                            "display_name": <display_name>,
+                            "avatar_url": <avatar_url>
+                        }
+                    ],
+                    "search_token": <token for retrieving more results>
+                }
+        """
+        results = False
+        if search_token:
+            # Get latest search (local + federated results) from cache
+            results = self._get_search_result(user_id, search_term)
+
+        # Trigger a federared search in order to cache result for the next call
+        # and return local result on first call (=without token) or if token is not known
+        if search_token is None or not results:
+            # Get local results first
+            results = await self.search_local_users(
+                user_id, search_term, limit
+            )
+            # Generate a search token for retrieving more results (local or federated)
+            search_token = self._get_next_search_token()
+            self._compute_limited(search_token, results)
+            self._update_search_result(user_id, search_term, search_token,
+                                       results, limit, is_limited=False)
+
+            self.search_and_cache_federated_users(user_id, search_term, limit, search_token, search_token)
+
+            return results
+        # Generate a search token for retrieving more results (local or federated)
+        next_search_token = self._get_next_search_token(search_token)
+        self._update_search_result(user_id, search_term, next_search_token,
+                                   results, limit)
+
+        return results
+
+    def _get_next_search_token(self, search_token:int = 0) -> int:
+        """Generate a unique search token.
+        Returns:
+            A unique search token
+        """
+        # Generate a random token
+        return search_token + 1
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""
