@@ -198,6 +198,9 @@ class WorkerLocksHandler:
         self._locks = {key: value for key, value in self._locks.items() if value}
 
 
+DEFAULT_RETRY_INTERVAL: float = 0.1
+
+
 @attr.s(auto_attribs=True, eq=False)
 class WaitingLock:
     clock: Clock
@@ -208,7 +211,7 @@ class WaitingLock:
     write: bool | None
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
     _inner_lock: Lock | None = None
-    _retry_interval: float = 0.1
+    _retry_interval: float = DEFAULT_RETRY_INTERVAL
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
@@ -217,6 +220,8 @@ class WaitingLock:
         """Release the lock (by resolving the deferred)"""
         if not self.deferred.called:
             with PreserveLoggingContext():
+                # Reset the retry interval since we're being woken up by a lock release
+                self._retry_interval = DEFAULT_RETRY_INTERVAL
                 self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
@@ -297,7 +302,7 @@ class WaitingMultiLock:
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
 
     _inner_lock_cm: AsyncContextManager | None = None
-    _retry_interval: float = 0.1
+    _retry_interval: float = DEFAULT_RETRY_INTERVAL
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
@@ -306,6 +311,8 @@ class WaitingMultiLock:
         """Release the lock (by resolving the deferred)"""
         if not self.deferred.called:
             with PreserveLoggingContext():
+                # Reset the retry interval since we're being woken up by a lock release
+                self._retry_interval = DEFAULT_RETRY_INTERVAL
                 self.deferred.callback(None)
 
     async def __aenter__(self) -> None:

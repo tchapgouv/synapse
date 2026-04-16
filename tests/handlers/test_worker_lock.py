@@ -21,10 +21,13 @@
 
 import logging
 import platform
+import time
+from unittest.mock import AsyncMock
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.handlers.worker_lock import DEFAULT_RETRY_INTERVAL
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -94,6 +97,52 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
                 nb_locks_taken += 1
 
         return nb_locks_taken
+
+    def test_test(self) -> None:
+        # Acquire the first lock
+        lock1 = self.worker_lock_handler.acquire_lock("name", "key")
+        self.get_success(lock1.__aenter__())
+
+        # Create multiple waiting locks
+        waiting_locks = {}
+        for _ in range(50):
+            lock = self.worker_lock_handler.acquire_lock("name", "key")
+            deferred_aenter = defer.ensureDeferred(lock.__aenter__())
+            waiting_locks[lock] = deferred_aenter
+
+        # All locks should still be waiting
+        for _, deferred_aenter in waiting_locks.items():
+            self.assertNoResult(deferred_aenter)
+
+        # Release the first lock - this should wake up all waiting locks
+        self.get_success(lock1.__aexit__(None, None, None))
+
+        with test_timeout(5):
+            while len(waiting_locks) > 0:
+                # Let's iterate on remaining locks to see if they were woken up
+                for lock, deferred_aenter in waiting_locks.items():
+                    if deferred_aenter.called:
+                        # If so, remove it from the waiting list and release it
+                        del waiting_locks[lock]
+                        self.get_success(lock.__aexit__(None, None, None))
+                        break
+                time.sleep(0.1)
+
+    def test_retry_interval_reset_on_lock_release(self) -> None:
+        lock = self.worker_lock_handler.acquire_lock("name", "key")
+
+        # This will simulate contention around the lock
+        lock.store.try_acquire_lock = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        defer.ensureDeferred(lock.__aenter__())
+
+        print(lock._retry_interval)
+
+        # Simulate a lock release, but the lock can't be acquired because we are
+        # simulating contention here
+        lock.release_lock()
+
+        # Lock has been released, so the retry interval should have been reset
+        self.assertEqual(lock._retry_interval, DEFAULT_RETRY_INTERVAL)
 
 
 class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
