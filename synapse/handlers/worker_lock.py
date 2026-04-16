@@ -232,6 +232,7 @@ class WaitingLock:
         """Release the lock (by resolving the deferred)"""
         if not self.deferred.called:
             with PreserveLoggingContext():
+                self._retry_interval = 0.1
                 self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
@@ -347,6 +348,7 @@ class WaitingMultiLock:
         """Release the lock (by resolving the deferred)"""
         if not self.deferred.called:
             with PreserveLoggingContext():
+                self._retry_interval = 0.1
                 self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
