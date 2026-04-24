@@ -500,7 +500,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
     def test_search_user_directory_across_federation_server_error(self) -> None:
         """Test that the federation client handles server errors correctly."""
         # Mock the _try_destination_list method to return None (indicating all servers failed)
-        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.federation_client.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
             side_effect=HttpResponseException(500, "Internal Server Error", b"{}")
         )
 

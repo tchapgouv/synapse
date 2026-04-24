@@ -1997,12 +1997,14 @@ class FederationClient(FederationBase):
                 requester, destination, search_term, limit
             )
             return response
-        except HttpResponseException as e:
-            # If the remote server doesn't support this endpoint, return empty results
-            if e.code in (404, 405):
-                return {"limited": False, "results": []}
-            # Otherwise, something else went wrong, so just re-raise
-            raise
+        except Exception as e:
+            # If something goes wrong, we still want to return what we have
+            logger.exception(
+                "Error searching user directory across federation[destination=%s] : %s",
+                destination,
+                e,
+            )
+            return {"limited": False, "results": []}
 
     async def search_user_directory_across_federation(
         self,
@@ -2042,24 +2044,18 @@ class FederationClient(FederationBase):
 
         # Execute all queries in parallel
         if query_tasks:
-            try:
-                server_results = await make_deferred_yieldable(
-                    defer.gatherResults(
-                        query_tasks,
-                        consumeErrors=True,
-                    )
+            server_results = await make_deferred_yieldable(
+                defer.gatherResults(
+                    query_tasks,
+                    consumeErrors=True,
                 )
+            )
 
-                # Process results from each server
-                for result in server_results:
-                    if result.get("limited", False):
-                        limited = True
-                    combined_results.extend(result.get("results", []))
-            except Exception as e:
-                # If something goes wrong, we still want to return what we have
-                logger.exception(
-                    "Error searching user directory across federation : %s", e
-                )
+            # Process results from each server
+            for result in server_results:
+                if result.get("limited", False):
+                    limited = True
+                combined_results.extend(result.get("results", []))
 
         # Sort results by display name (case insensitive)
         combined_results.sort(
@@ -2070,7 +2066,6 @@ class FederationClient(FederationBase):
                 user.get("user_id", ""),
             )
         )
-
         # Limit the total number of results
         if len(combined_results) > limit:
             combined_results = combined_results[:limit]

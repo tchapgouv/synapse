@@ -86,7 +86,7 @@ class UserDirectorySearchRestServlet(RestServlet):
 
         body = parse_json_object_from_request(request)
 
-        limit = int(body.get("limit", 5))
+        limit = int(body.get("limit", 10))
         limit = max(min(limit, 50), 0)
 
         try:
@@ -94,27 +94,43 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
+        if search_term and len(search_term) < 4:
+            return 200, {"limited": False, "results": []}
+
         # Get local results first
         local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
+        # Return local result if we have reach limit
+        if len(local_results) > limit:
+            return 200, local_results
 
-        # Try to get federated results from cache
+        # Try to get federated results
         federated_results = (
             await self.user_directory_handler.get_federated_search_results(
                 user_id, search_term, limit
             )
         )
 
-        return 200, merge_search_results(local_results, federated_results)
+        return 200, merge_search_results(local_results, federated_results, limit)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserDirectorySearchRestServlet(hs).register(http_server)
 
 
-def merge_search_results(a: JsonMapping, b: JsonMapping) -> JsonMapping:
+def merge_search_results(local_results: JsonMapping, federated_results: JsonMapping, limit: int) -> JsonMapping:
+    """
+    Merge local results and federated results.
+    We prioritize the local result then federated results.
+    """
+    results = local_results["results"] + federated_results["results"]
+    limited = False
+    # Limit the total number of results
+    if len(results) > limit:
+        results = results[:limit]
+        limited = True
     return {
-        "limited": a["limited"] or b["limited"],
-        "results": a["results"] + b["results"],
+        "limited": limited,
+        "results": results,
     }

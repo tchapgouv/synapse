@@ -881,7 +881,9 @@ class TransportLayerClient:
             FEDERATION_UNSTABLE_PREFIX, "/org.matrix.msc4258" + "/user_directory/search"
         )
         content = {"requester": requester, "search_term": search_term, "limit": limit}
-        return await self.client.post_json(destination, path=path, data=content)
+        return await self.client.post_json(
+            destination, path=path, data=content, timeout=2000
+        )
 
     async def download_media_r0(
         self,

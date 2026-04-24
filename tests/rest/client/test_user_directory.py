@@ -16,11 +16,14 @@
 from typing import Any
 from unittest.mock import AsyncMock
 
+from twisted.internet import defer
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
+from synapse.api.errors import RequestSendFailed
 from synapse.rest.client import login, register, user_directory
 from synapse.server import HomeServer
+from synapse.types import JsonMapping
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -42,6 +45,7 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config["user_directory"] = {"enabled": True, "search_all_users": True}
+        config["federation_domain_whitelist"] = ["test", "test2", "test3"]
         return self.setup_test_homeserver(config=config)
 
     def prepare(
@@ -58,6 +62,8 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         # Mock the search_users method to return controlled results
         self.search_users_mock = AsyncMock()
         self.user_directory_handler.search_users = self.search_users_mock
+        self.federation_client_user_directory_search_mock = AsyncMock()
+        self.user_directory_handler.federation_client.transport_layer.user_directory_search = self.federation_client_user_directory_search_mock
 
         # Create access tokens for testing
         self.bob_token = self.get_success(
@@ -85,6 +91,25 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
             ],
         }
 
+        async def mock_federation(
+            requester: str, destination: str, search_term: str, limit: int
+        ) -> JsonMapping:
+            if destination == "test2":
+                return {
+                    "limited": False,
+                    "results": [
+                        {
+                            "user_id": "@john-marvelous:test2",
+                            "display_name": "John Marvelous",
+                            "avatar_url": "mxc://test2/john-marvelous",
+                        }
+                    ],
+                }
+            else:
+                return {"limited": False, "results": []}
+
+        self.federation_client_user_directory_search_mock.side_effect = mock_federation
+
         # Make a request to the search endpoint
         channel = self.make_request(
             "POST",
@@ -104,13 +129,104 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
                         "user_id": "@alice:test",
                         "display_name": "Alice",
                         "avatar_url": None,
-                    }
+                    },
+                    {
+                        "user_id": "@john-marvelous:test2",
+                        "display_name": "John Marvelous",
+                        "avatar_url": "mxc://test2/john-marvelous",
+                    },
                 ],
             },
         )
 
         # Check that the search_users method was called with the correct arguments
-        self.search_users_mock.assert_called_once_with("@bob:test", "alice", 5)
+        self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
+        self.federation_client_user_directory_search_mock.assert_any_call(
+            "@bob:test", "test2", "alice", 10
+        )
+        self.federation_client_user_directory_search_mock.assert_any_call(
+            "@bob:test", "test3", "alice", 10
+        )
+        self.assertEqual(
+            self.federation_client_user_directory_search_mock.call_count, 2
+        )
+
+    def test_search_users_with_timeout(self) -> None:
+        """Test that a search without a token works as expected."""
+        # Set up the mock to return some results
+        self.search_users_mock.return_value = {
+            "limited": False,
+            "results": [
+                {
+                    "user_id": "@alice:test",
+                    "display_name": "Alice",
+                    "avatar_url": None,
+                }
+            ],
+        }
+
+        async def mock_federation(
+            requester: str, destination: str, search_term: str, limit: int
+        ) -> JsonMapping:
+            if destination == "test2":
+                return {
+                    "limited": False,
+                    "results": [
+                        {
+                            "user_id": "@john-marvelous:test2",
+                            "display_name": "John Marvelous",
+                            "avatar_url": "mxc://test2/john-marvelous",
+                        }
+                    ],
+                }
+            else:
+                raise RequestSendFailed(
+                    defer.TimeoutError("Timed out after 2 seconds"),
+                    can_retry=False,
+                )
+
+        self.federation_client_user_directory_search_mock.side_effect = mock_federation
+
+        # Make a request to the search endpoint
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user_directory/search",
+            {"search_term": "alice"},
+            access_token=self.bob_token,
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@alice:test",
+                        "display_name": "Alice",
+                        "avatar_url": None,
+                    },
+                    {
+                        "user_id": "@john-marvelous:test2",
+                        "display_name": "John Marvelous",
+                        "avatar_url": "mxc://test2/john-marvelous",
+                    },
+                ],
+            },
+        )
+
+        # Check that the search_users method was called with the correct arguments
+        self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
+        self.federation_client_user_directory_search_mock.assert_any_call(
+            "@bob:test", "test2", "alice", 10
+        )
+        self.federation_client_user_directory_search_mock.assert_any_call(
+            "@bob:test", "test3", "alice", 10
+        )
+        self.assertEqual(
+            self.federation_client_user_directory_search_mock.call_count, 2
+        )
 
     def test_search_with_limit(self) -> None:
         """Test that a search with a limit works as expected."""
@@ -125,6 +241,10 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
                 }
             ],
         }
+        self.federation_client_user_directory_search_mock.return_value = {
+            "limited": False,
+            "results": [],
+        }
 
         # Make a request to the search endpoint with a limit
         channel = self.make_request(
@@ -136,7 +256,7 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
 
         # Check that the response is correct
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["limited"], True)
+        self.assertEqual(channel.json_body["limited"], False)
         self.assertEqual(len(channel.json_body["results"]), 1)
 
         # Check that the search_users method was called with the correct arguments
@@ -154,6 +274,10 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
                     "avatar_url": None,
                 }
             ],
+        }
+        self.federation_client_user_directory_search_mock.return_value = {
+            "limited": False,
+            "results": [],
         }
 
         # Make an initial request
