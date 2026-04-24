@@ -119,12 +119,23 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserDirectorySearchRestServlet(hs).register(http_server)
 
 
-def merge_search_results(local_results: JsonMapping, federated_results: JsonMapping, limit: int) -> JsonMapping:
+def merge_search_results(
+    local_results: JsonMapping, federated_results: JsonMapping, limit: int
+) -> JsonMapping:
     """
     Merge local results and federated results.
     We prioritize the local result then federated results.
     """
-    results = local_results["results"] + federated_results["results"]
+    concatenation = local_results["results"] + federated_results["results"]
+
+    # Remove duplicates as local homeservers may know some of the federated users
+    seen = set()
+    results = []
+    for user in concatenation:
+        if user["user_id"] not in seen:
+            seen.add(user["user_id"])
+            results.append(user)
+
     limited = False
     # Limit the total number of results
     if len(results) > limit:

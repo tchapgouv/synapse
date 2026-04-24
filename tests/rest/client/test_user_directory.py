@@ -87,7 +87,13 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
                     "user_id": "@alice:test",
                     "display_name": "Alice",
                     "avatar_url": None,
-                }
+                },
+                # Local homeserver may have discovered this user
+                {
+                    "user_id": "@john-marvelous:test2",
+                    "display_name": "John Marvelous",
+                    "avatar_url": "mxc://test2/john-marvelous",
+                },
             ],
         }
 
