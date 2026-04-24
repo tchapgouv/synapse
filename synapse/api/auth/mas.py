@@ -28,6 +28,7 @@ from pydantic import (
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,
+    Codes,  #:tchap:
     HttpResponseException,
     InvalidClientTokenError,
     SynapseError,
@@ -45,6 +46,7 @@ from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.duration import Duration
 from synapse.util.json import json_decoder
 
 from . import introspection_response_timer
@@ -105,6 +107,7 @@ class MasDelegatedAuth(BaseAuth):
         self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._config = hs.config.mas
+        self._account_validity_handler = hs.get_account_validity_handler()  #:tchap:
 
         self._http_client = hs.get_proxied_http_client()
         self._rust_http_client = HttpClient(
@@ -139,7 +142,7 @@ class MasDelegatedAuth(BaseAuth):
             clock=self._clock,
             name="mas_token_introspection",
             server_name=self.server_name,
-            timeout_ms=120_000,
+            timeout=Duration(minutes=20),
             # don't log because the keys are access tokens
             enable_logging=False,
         )
@@ -289,6 +292,22 @@ class MasDelegatedAuth(BaseAuth):
                     token=access_token,
                     allow_expired=allow_expired,
                 )
+
+                #:tchap:
+                # Deny the request if the user account has expired.
+                if not allow_expired:
+                    if await self._account_validity_handler.is_user_expired(
+                        requester.user.to_string()
+                    ):
+                        # Raise the error if either an account validity module has determined
+                        # the account has expired, or the legacy account validity
+                        # implementation is enabled and determined the account has expired
+                        raise AuthError(
+                            403,
+                            "User account has expired",
+                            errcode=Codes.EXPIRED_ACCOUNT,
+                        )
+                #:tchap: end
 
             await self._record_request(request, requester)
 

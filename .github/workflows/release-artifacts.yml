@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.x"
       - id: set-distros
@@ -70,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           # setup-python@v4 doesn't impose a default python version. Need to use 3.x
           # here, because `python` on osx points to Python 2.7.
@@ -86,13 +86,17 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
-          ### Deactivate pipeline : not required for Tchap Synapse ###
-          CIBW_SKIP: cp36-* cp37-* cp38-* cp39-* pp3*-* *i686* *musl*
-          ### Deactivate version : not required for Tchap Synapse ###
+          # The platforms that we build for are determined by the
+          # `tool.cibuildwheel.skip` option in `pyproject.toml`.
+
+          ### Deactivate other version : not required for Tchap Synapse ###
           CIBW_BUILD: cp310-manylinux_x86_64
-          # Skip testing for platforms which various libraries don't have wheels
-          # for, and so need extra build deps.
-          CIBW_TEST_SKIP: pp3*-* *i686* *musl*
+
+          # We skip testing wheels for the following platforms in CI:
+          #
+          # pp3*-* (PyPy wheels) broke in CI (TODO: investigate).
+          # musl: (TODO: investigate).
+          CIBW_TEST_SKIP: pp3*-* *musl*
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -106,7 +110,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.10"
 
@@ -133,14 +137,7 @@ jobs:
     steps:
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-### Deactivate Build a tarball for the debs : not required for Tchap Synapse ###
-#      - name: Build a tarball for the debs
-#        We need to merge all the debs uploads into one folder, then compress
-#        that.
-#        run: |
-#          mkdir debs
-#          mv debs*/* debs/
-#          tar -cvJf debs.tar.xz debs
+### Deactivate debs archiving : not required for Tchap Synapse ###
       - name: Attach to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -151,4 +148,3 @@ jobs:
             --repo ${{ github.repository }}
 ### Deactivate debs archiving : not required for Tchap Synapse ###
 #            debs.tar.xz \
-
