@@ -611,3 +611,10 @@ class ExperimentalConfig(Config):
         # Note that sticky events persisted before this feature is enabled will not be
         # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
+
+        # MSC4258: Federated User Search
+        self.msc4258_enabled: bool = experimental.get("msc4258_enabled", False)
+
+        self.msc4258_federation_search_timeout: int = experimental.get(
+            "msc4258_federation_search_timeout", 2000
+        )

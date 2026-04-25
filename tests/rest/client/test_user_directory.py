@@ -45,7 +45,11 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config["user_directory"] = {"enabled": True, "search_all_users": True}
+        config["experimental_features"] = {"msc4258_enabled": True}
         config["federation_domain_whitelist"] = ["test", "test2", "test3"]
+        # Override with additional config
+        if self._extra_config:
+            config.update(self._extra_config)
         return self.setup_test_homeserver(config=config)
 
     def prepare(
@@ -78,6 +82,80 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         )
 
     def test_search_users(self) -> None:
+        """Test that a search without a token works as expected."""
+        # Set up the mock to return some results
+        self.search_users_mock.return_value = {
+            "limited": False,
+            "results": [
+                {
+                    "user_id": "@alice:test",
+                    "display_name": "Alice",
+                    "avatar_url": None,
+                },
+            ],
+        }
+
+        async def mock_federation(
+            requester: str, destination: str, search_term: str, limit: int
+        ) -> JsonMapping:
+            if destination == "test2":
+                return {
+                    "limited": False,
+                    "results": [
+                        {
+                            "user_id": "@john-marvelous:test2",
+                            "display_name": "John Marvelous",
+                            "avatar_url": "mxc://test2/john-marvelous",
+                        }
+                    ],
+                }
+            else:
+                return {"limited": False, "results": []}
+
+        self.federation_client_user_directory_search_mock.side_effect = mock_federation
+
+        # Make a request to the search endpoint
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user_directory/search",
+            {"search_term": "alice"},
+            access_token=self.bob_token,
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@alice:test",
+                        "display_name": "Alice",
+                        "avatar_url": None,
+                    },
+                    {
+                        "user_id": "@john-marvelous:test2",
+                        "display_name": "John Marvelous",
+                        "avatar_url": "mxc://test2/john-marvelous",
+                    },
+                ],
+            },
+        )
+
+        # Check that the search_users method was called with the correct arguments
+        self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
+        self.federation_client_user_directory_search_mock.assert_any_call(
+            "@bob:test", "test2", "alice", 10
+        )
+        self.federation_client_user_directory_search_mock.assert_any_call(
+            "@bob:test", "test3", "alice", 10
+        )
+        self.assertEqual(
+            self.federation_client_user_directory_search_mock.call_count, 2
+        )
+
+    def test_search_users_when_local_hs_has_discovered_same_user(self) -> None:
         """Test that a search without a token works as expected."""
         # Set up the mock to return some results
         self.search_users_mock.return_value = {
@@ -346,3 +424,66 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
 
         # Check that get_federated_search_results was called twice, once for each request
         self.assertEqual(get_federated_results_mock.call_count, 2)
+
+    @unittest.override_config({"experimental_features": {"msc4258_enabled": False}})
+    def test_search_users_if_msc4258_is_not_enabled(self) -> None:
+        """Test that a search without a token works as expected."""
+        # Set up the mock to return some results
+        self.search_users_mock.return_value = {
+            "limited": False,
+            "results": [
+                {
+                    "user_id": "@alice:test",
+                    "display_name": "Alice",
+                    "avatar_url": None,
+                }
+            ],
+        }
+
+        async def mock_federation(
+            requester: str, destination: str, search_term: str, limit: int
+        ) -> JsonMapping:
+            if destination == "test2":
+                return {
+                    "limited": False,
+                    "results": [
+                        {
+                            "user_id": "@john-marvelous:test2",
+                            "display_name": "John Marvelous",
+                            "avatar_url": "mxc://test2/john-marvelous",
+                        }
+                    ],
+                }
+            else:
+                return {"limited": False, "results": []}
+
+        self.federation_client_user_directory_search_mock.side_effect = mock_federation
+
+        # Make a request to the search endpoint
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user_directory/search",
+            {"search_term": "alice"},
+            access_token=self.bob_token,
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@alice:test",
+                        "display_name": "Alice",
+                        "avatar_url": None,
+                    }
+                ],
+            },
+        )
+
+        # Check that the search_users method was called with the correct arguments
+        self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
+        self.federation_client_user_directory_search_mock.assert_not_called()
+        self.federation_client_user_directory_search_mock.assert_not_called()

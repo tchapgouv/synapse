@@ -52,6 +52,7 @@ class UserDirectorySearchRestServlet(RestServlet):
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_user_directory,
         )
+        self.msc4258_enabled = self.hs.config.experimental.msc4258_enabled
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
         """Searches for users in directory, including federated results
@@ -94,14 +95,20 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        if search_term and len(search_term) < 4:
+        # Not triggering any search for less than 3 chars if MSC4258 is enabled
+        if self.msc4258_enabled and search_term and len(search_term) < 4:
             return 200, {"limited": False, "results": []}
 
         # Get local results first
         local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
-        # Return local result if we have reach limit
+
+        # If MSC4258 is not enabled this should work as before
+        if not self.msc4258_enabled:
+            return 200, local_results
+
+        # Return local result if we have reach limit (no need to call federation search)
         if len(local_results) > limit:
             return 200, local_results
 

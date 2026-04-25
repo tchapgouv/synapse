@@ -64,6 +64,9 @@ class TransportLayerClient:
     def __init__(self, hs: "HomeServer"):
         self.client = hs.get_federation_http_client()
         self._is_mine_server_name = hs.is_mine_server_name
+        self.user_directory_search_timeout = (
+            hs.config.experimental.msc4258_federation_search_timeout
+        )
 
     def shutdown(self) -> None:
         self.client.shutdown()
@@ -882,7 +885,12 @@ class TransportLayerClient:
         )
         content = {"requester": requester, "search_term": search_term, "limit": limit}
         return await self.client.post_json(
-            destination, path=path, data=content, timeout=2000
+            destination,
+            path=path,
+            data=content,
+            # ignore backoff for user search as we will set a small user_directory_search_timeout
+            ignore_backoff=True,
+            timeout=self.user_directory_search_timeout,
         )
 
     async def download_media_r0(
