@@ -86,7 +86,14 @@ from synapse.replication.http.federation import (
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
-from synapse.types import JsonDict, JsonMapping, StateMap, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    StateMap,
+    UserID,
+    get_domain_from_id,
+    get_localpart_from_id,
+)
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
@@ -1400,7 +1407,7 @@ class FederationServer(FederationBase):
             raise AuthError(code=403, msg="Server is banned from room")
 
     async def on_user_directory_search_request(
-        self, origin: str, search_term: str, limit: int
+        self, requester_id: str, origin: str, search_term: str, limit: int
     ) -> tuple[int, JsonMapping]:
         """Handle a search request from a remote server
         Args:
@@ -1413,9 +1420,10 @@ class FederationServer(FederationBase):
         # Get the user directory handler
         user_directory_handler = self.hs.get_user_directory_handler()
 
-        # Use a dummy user_id from the requesting server for the search
+        # Use a dummy user_id built from the requester to perform the search
         # This ensures we only return results that would be visible to users on that server
-        dummy_user_id = f"@federation_search:{origin}"
+        localpart = get_localpart_from_id(requester_id)
+        dummy_user_id = f"{localpart}:{origin}"
 
         # Perform the search
         results = await user_directory_handler.search_users(

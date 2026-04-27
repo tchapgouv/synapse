@@ -931,6 +931,10 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
         if not search_term or not isinstance(search_term, str):
             raise SynapseError(400, "Missing or invalid search_term", Codes.BAD_JSON)
 
+        # Not triggering any search for less than 3 chars
+        if search_term and len(search_term) < 4:
+            return 200, {"limited": False, "results": []}
+
         limit = content.get("limit", 10)
         if not isinstance(limit, int):
             raise SynapseError(400, "Invalid limit", Codes.BAD_JSON)
@@ -938,7 +942,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
         limit = max(min(limit, 50), 0)  # Clamp limit between 0 and 50
 
         return await self.handler.on_user_directory_search_request(
-            origin, search_term, limit
+            requester, origin, search_term, limit
         )
 
 

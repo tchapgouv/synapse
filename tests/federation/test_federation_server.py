@@ -103,7 +103,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
     def test_federation_user_directory_search_servlet(self) -> None:
         """Test that the federation user directory search servlet works correctly."""
-        self.register_user("user", "password")
+        self.register_user("userlambda", "password")
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
@@ -111,7 +111,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
             content={
                 "requester": "@requester:other.example.com",
-                "search_term": "us",
+                "search_term": "user",
                 "limit": 10,
             },
         )
@@ -121,7 +121,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.json_body.get("limited", None), False)
         results = channel.json_body.get("results", [])
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].get("user_id"), "@user:test")
+        self.assertEqual(results[0].get("user_id"), "@userlambda:test")
 
     def test_federation_user_directory_search_servlet_invalid_request(self) -> None:
         """Test that the federation user directory search servlet rejects invalid requests."""
