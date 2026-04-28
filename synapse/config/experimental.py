@@ -613,3 +613,10 @@ class ExperimentalConfig(Config):
         # Tracked in: https://github.com/element-hq/synapse/issues/19691
         # Note that this is only applicable to legacy auth, not MAS integration (OAuth 2.0).
         self.msc4450_enabled: bool = experimental.get("msc4450_enabled", False)
+
+        # MSC4258: Federated User Search
+        self.msc4258_enabled: bool = experimental.get("msc4258_enabled", False)
+
+        self.msc4258_federation_search_timeout: int = experimental.get(
+            "msc4258_federation_search_timeout", 2000
+        )
