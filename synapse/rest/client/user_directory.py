@@ -148,6 +148,15 @@ def merge_search_results(
     if len(results) > limit:
         results = results[:limit]
         limited = True
+
+    # Sort results by display name (case insensitive)
+    results.sort(
+        key=lambda user: (
+            user.get("display_name", "").lower() if user.get("display_name") else "",
+            user.get("user_id", ""),
+        )
+    )
+
     return {
         "limited": limited,
         "results": results,

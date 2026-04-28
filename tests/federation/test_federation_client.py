@@ -351,7 +351,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
         # Call the federation client method
         result = self.get_success(
             self.federation_client.user_directory_search(
-                "@requester:example.com", "other.example.com", "test", 10
+                "@requester:example.com", "other.example.com", "test", 2000, 10
             )
         )
 
@@ -360,7 +360,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Check that user_directory_search was called with the correct arguments
         self.transport_layer.user_directory_search.assert_called_once_with(
-            "@requester:example.com", "other.example.com", "test", 10
+            "@requester:example.com", "other.example.com", "test", 10, 2000
         )
 
     def test_user_directory_search_endpoint_not_found(self) -> None:
@@ -387,7 +387,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Mock the user_directory_search method to return different results for different servers
         async def mock_user_directory_search(
-            requester: str, destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, timeout: int, limit: int
         ) -> JsonDict:
             if destination == "server1.example.com":
                 return {
@@ -453,7 +453,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Mock the user_directory_search method to return many results
         async def mock_user_directory_search(
-            requester: str, destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, timeout: int, limit: int
         ) -> JsonDict:
             return {
                 "limited": False,

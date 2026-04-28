@@ -139,6 +139,9 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self.user_directory_search_timeout = (
+            hs.config.experimental.msc4258_federation_search_timeout
+        )
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -1981,7 +1984,12 @@ class FederationClient(FederationBase):
         return filtered_statuses, filtered_failures
 
     async def user_directory_search(
-        self, requester: str, destination: str, search_term: str, limit: int = 10
+        self,
+        requester: str,
+        destination: str,
+        search_term: str,
+        timeout: int,
+        limit: int = 10,
     ) -> JsonDict:
         """Search for users in the user directory of a remote server.
         Args:
@@ -1994,7 +2002,7 @@ class FederationClient(FederationBase):
         """
         try:
             response = await self.transport_layer.user_directory_search(
-                requester, destination, search_term, limit
+                requester, destination, search_term, limit, timeout
             )
             return response
         except Exception as e:
@@ -2037,7 +2045,11 @@ class FederationClient(FederationBase):
                 # Convert coroutine to Deferred
                 deferred = defer.ensureDeferred(
                     self.user_directory_search(
-                        requester, destination, search_term, limit
+                        requester,
+                        destination,
+                        search_term,
+                        self.user_directory_search_timeout,
+                        limit,
                     )
                 )
                 query_tasks.append(deferred)
@@ -2057,15 +2069,6 @@ class FederationClient(FederationBase):
                     limited = True
                 combined_results.extend(result.get("results", []))
 
-        # Sort results by display name (case insensitive)
-        combined_results.sort(
-            key=lambda user: (
-                user.get("display_name", "").lower()
-                if user.get("display_name")
-                else "",
-                user.get("user_id", ""),
-            )
-        )
         # Limit the total number of results
         if len(combined_results) > limit:
             combined_results = combined_results[:limit]

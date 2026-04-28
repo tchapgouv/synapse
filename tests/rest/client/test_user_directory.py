@@ -96,7 +96,7 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         }
 
         async def mock_federation(
-            requester: str, destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, limit: int, timeout: int
         ) -> JsonMapping:
             if destination == "test2":
                 return {
@@ -146,10 +146,10 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         # Check that the search_users method was called with the correct arguments
         self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
         self.federation_client_user_directory_search_mock.assert_any_call(
-            "@bob:test", "test2", "alice", 10
+            "@bob:test", "test2", "alice", 10, 2000
         )
         self.federation_client_user_directory_search_mock.assert_any_call(
-            "@bob:test", "test3", "alice", 10
+            "@bob:test", "test3", "alice", 10, 2000
         )
         self.assertEqual(
             self.federation_client_user_directory_search_mock.call_count, 2
@@ -176,7 +176,7 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         }
 
         async def mock_federation(
-            requester: str, destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, timeout: int, limit: int
         ) -> JsonMapping:
             if destination == "test2":
                 return {
@@ -226,10 +226,10 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         # Check that the search_users method was called with the correct arguments
         self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
         self.federation_client_user_directory_search_mock.assert_any_call(
-            "@bob:test", "test2", "alice", 10
+            "@bob:test", "test2", "alice", 10, 2000
         )
         self.federation_client_user_directory_search_mock.assert_any_call(
-            "@bob:test", "test3", "alice", 10
+            "@bob:test", "test3", "alice", 10, 2000
         )
         self.assertEqual(
             self.federation_client_user_directory_search_mock.call_count, 2
@@ -250,7 +250,7 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         }
 
         async def mock_federation(
-            requester: str, destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, timeout: int, limit: int
         ) -> JsonMapping:
             if destination == "test2":
                 return {
@@ -303,10 +303,10 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         # Check that the search_users method was called with the correct arguments
         self.search_users_mock.assert_called_once_with("@bob:test", "alice", 10)
         self.federation_client_user_directory_search_mock.assert_any_call(
-            "@bob:test", "test2", "alice", 10
+            "@bob:test", "test2", "alice", 10, 2000
         )
         self.federation_client_user_directory_search_mock.assert_any_call(
-            "@bob:test", "test3", "alice", 10
+            "@bob:test", "test3", "alice", 10, 2000
         )
         self.assertEqual(
             self.federation_client_user_directory_search_mock.call_count, 2
@@ -441,7 +441,7 @@ class UserDirectorySearchTestCase(unittest.HomeserverTestCase):
         }
 
         async def mock_federation(
-            requester: str, destination: str, search_term: str, limit: int
+            requester: str, destination: str, search_term: str, timeout: int, limit: int
         ) -> JsonMapping:
             if destination == "test2":
                 return {

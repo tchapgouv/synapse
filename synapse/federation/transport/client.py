@@ -64,9 +64,6 @@ class TransportLayerClient:
     def __init__(self, hs: "HomeServer"):
         self.client = hs.get_federation_http_client()
         self._is_mine_server_name = hs.is_mine_server_name
-        self.user_directory_search_timeout = (
-            hs.config.experimental.msc4258_federation_search_timeout
-        )
 
     def shutdown(self) -> None:
         self.client.shutdown()
@@ -868,7 +865,12 @@ class TransportLayerClient:
         )
 
     async def user_directory_search(
-        self, requester: str, destination: str, search_term: str, limit: int
+        self,
+        requester: str,
+        destination: str,
+        search_term: str,
+        limit: int,
+        timeout: int,
     ) -> JsonDict:
         """
         Search for users in the user directory of a remote server.
@@ -877,6 +879,7 @@ class TransportLayerClient:
             destination: The server to query.
             search_term: The search term to look for.
             limit: Maximum number of results to return.
+            timeout: timeout in milliseconds to get the response from destination.
         Returns:
             The search results.
         """
@@ -890,7 +893,7 @@ class TransportLayerClient:
             data=content,
             # ignore backoff for user search as we will set a small user_directory_search_timeout
             ignore_backoff=True,
-            timeout=self.user_directory_search_timeout,
+            timeout=timeout,
         )
 
     async def download_media_r0(
