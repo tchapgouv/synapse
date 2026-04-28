@@ -52,9 +52,16 @@ class UserDirectorySearchRestServlet(RestServlet):
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_user_directory,
         )
+        self.msc4258_enabled = self.hs.config.experimental.msc4258_enabled
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
-        """Searches for users in directory
+        """Searches for users in directory, including federated results
+
+        Request:
+            {
+                "search_term": "search query",
+                "limit": 10,
+            }
 
         Returns:
             dict of the form::
@@ -88,12 +95,69 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        results = await self.user_directory_handler.search_users(
+        # Not triggering any search for less than 3 chars if MSC4258 is enabled
+        if self.msc4258_enabled and search_term and len(search_term) < 4:
+            return 200, {"limited": False, "results": []}
+
+        # Get local results first
+        local_results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
 
-        return 200, results
+        # If MSC4258 is not enabled this should work as before
+        if not self.msc4258_enabled:
+            return 200, local_results
+
+        # Return local result if we have reach limit (no need to call federation search)
+        if len(local_results) > limit:
+            return 200, local_results
+
+        # Try to get federated results
+        federated_results = (
+            await self.user_directory_handler.get_federated_search_results(
+                user_id, search_term, limit
+            )
+        )
+
+        return 200, merge_search_results(local_results, federated_results, limit)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserDirectorySearchRestServlet(hs).register(http_server)
+
+
+def merge_search_results(
+    local_results: JsonMapping, federated_results: JsonMapping, limit: int
+) -> JsonMapping:
+    """
+    Merge local results and federated results.
+    We prioritize the local result then federated results.
+    """
+    concatenation = local_results["results"] + federated_results["results"]
+
+    # Remove duplicates as local homeservers may know some of the federated users
+    seen = set()
+    results = []
+    for user in concatenation:
+        if user["user_id"] not in seen:
+            seen.add(user["user_id"])
+            results.append(user)
+
+    limited = False
+    # Limit the total number of results
+    if len(results) > limit:
+        results = results[:limit]
+        limited = True
+
+    # Sort results by display name (case insensitive)
+    results.sort(
+        key=lambda user: (
+            user.get("display_name", "").lower() if user.get("display_name") else "",
+            user.get("user_id", ""),
+        )
+    )
+
+    return {
+        "limited": limited,
+        "results": results,
+    }
