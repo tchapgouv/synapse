@@ -1,6 +1,6 @@
 {
   "$schema": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
-  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.137/synapse-config.schema.json",
+  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.154/synapse-config.schema.json",
   "type": "object",
   "properties": {
     "modules": {
@@ -83,7 +83,7 @@
     },
     "use_frozen_dicts": {
       "type": "boolean",
-      "description": "Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.",
+      "description": "Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.\n\n> ⚠️ **Warning** – This option is known to introduce a new class of [comparison bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.",
       "default": false,
       "examples": [
         true
@@ -593,6 +593,11 @@
           "description": "The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted.",
           "default": "http://localhost:8080"
         },
+        "force_http2": {
+          "type": "boolean",
+          "description": "Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not.",
+          "default": false
+        },
         "secret": {
           "type": [
             "string",
@@ -992,7 +997,7 @@
     },
     "limit_remote_rooms": {
       "type": "object",
-      "description": "When this option is enabled, the room \"complexity\" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.",
+      "description": "When this option is enabled, the room \"complexity\" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. \"Current\" here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current `m.room.member` state event.",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -1954,10 +1959,8 @@
       "$ref": "#/$defs/rc",
       "description": "Ratelimiting settings for reporting content.\nThis is a ratelimiting option that ratelimits reports made by users about content they see.\nSetting this to a high value allows users to report content quickly, possibly in duplicate. This can result in higher database usage.",
       "default": {
-        "per_user": {
-          "per_second": 1.0,
-          "burst_count": 5.0
-        }
+        "per_second": 1.0,
+        "burst_count": 5.0
       },
       "examples": [
         {
@@ -1970,10 +1973,8 @@
       "$ref": "#/$defs/rc",
       "description": "Sets rate limits for how often users are able to create rooms.",
       "default": {
-        "per_user": {
-          "per_second": 0.016,
-          "burst_count": 10.0
-        }
+        "per_second": 0.016,
+        "burst_count": 10.0
       },
       "examples": [
         {
@@ -1981,6 +1982,14 @@
           "burst_count": 5.0
         }
       ]
+    },
+    "rc_user_directory": {
+      "$ref": "#/$defs/rc",
+      "description": "This option allows admins to ratelimit searches in the user directory.\n\n_Added in Synapse 1.145.0._",
+      "default": {
+        "per_second": 0.016,
+        "burst_count": 200.0
+      }
     },
     "federation_rr_transactions_per_room_per_second": {
       "type": "integer",
@@ -2001,6 +2010,14 @@
     "enable_media_repo": {
       "type": "boolean",
       "description": "Enable the media store service in the Synapse master. Set to false if you are using a separate media store worker.",
+      "default": true,
+      "examples": [
+        false
+      ]
+    },
+    "enable_local_media_storage": {
+      "type": "boolean",
+      "description": "Enable the local on-disk media storage provider. When disabled, media is stored only in configured `media_storage_providers` and temporary files are used for processing.\n**Warning:** If this option is set to `false` and no `media_storage_providers` are configured, all media requests will return 404 errors as there will be no storage backend available.",
       "default": true,
       "examples": [
         false
@@ -2089,7 +2106,7 @@
     },
     "media_upload_limits": {
       "type": "array",
-      "description": "A list of media upload limits defining how much data a given user can upload in a given time period.\n\nAn empty list means no limits are applied.",
+      "description": "A list of media upload limits defining how much data a given user can upload in a given time period.\nThese limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).\n\nAn empty list means no limits are applied.\n\nThese settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).",
       "default": [],
       "items": {
         "time_period": {
@@ -2518,6 +2535,46 @@
       "default": true,
       "examples": [
         false
+      ]
+    },
+    "matrix_rtc": {
+      "type": "object",
+      "description": "Options related to MatrixRTC.",
+      "properties": {
+        "transports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "The type of transport to use to connect to the selective forwarding unit (SFU).",
+                "example": "livekit"
+              },
+              "livekit_service_url": {
+                "type": "string",
+                "description": "The base URL of the LiveKit service. Should only be used with LiveKit-based transports.",
+                "example": "https://matrix-rtc.example.com/livekit/jwt"
+              }
+            }
+          },
+          "description": "A list of transport types and arguments to use for MatrixRTC connections.",
+          "default": []
+        }
+      },
+      "default": {},
+      "examples": [
+        {
+          "transports": [
+            {
+              "type": "livekit",
+              "livekit_service_url": "https://matrix-rtc.example.com/livekit/jwt"
+            }
+          ]
+        }
       ]
     },
     "enable_registration": {
@@ -3749,7 +3806,7 @@
         },
         "update_profile_information": {
           "type": "boolean",
-          "description": "Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in.",
+          "description": "Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:\n  * displayname\n  * picture - only if Synapse media repository is running in the main\n     process (i.e. not workerized) and media is stored locally",
           "default": false
         }
       },
@@ -3857,7 +3914,7 @@
             "string",
             "null"
           ],
-          "description": "Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP!",
+          "description": "A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP!",
           "default": null
         },
         "policy": {
@@ -4558,7 +4615,7 @@
     },
     "outbound_federation_restricted_to": {
       "type": "array",
-      "description": "When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.\n\nAlso see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.\n\n_Added in Synapse 1.89.0._",
+      "description": "You can restrict outbound federation traffic to only go through a specific subset of workers including the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker specified here (including the SBG) must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.\n\nAlso see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.\n\n_Added in Synapse 1.89.0._",
       "items": {
         "type": "string"
       },
