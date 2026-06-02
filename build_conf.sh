@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-DOCKER_DEMO_REPO="/Users/mca/Documents/work/projets/betagouv/repo/element-docker-demo"
+DOCKER_DEMO_REPO="/Users/olivier/workspace/tchap/tchap-docker-integration"
 SYNAPSE_DATA=$(pwd)
 OUT="homeserver.yaml"
 OUT2="log_config.yaml"
