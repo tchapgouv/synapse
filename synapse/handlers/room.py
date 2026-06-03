@@ -616,6 +616,10 @@ class RoomCreationHandler:
             (EventTypes.PowerLevels, ""),
         ]
 
+        #:tchap: copy room access rule in the upgraded room
+        types_to_copy.extend([('im.vector.room.access_rules', "")])
+        #:tchap:end
+
         room_type = old_room_create_event.content.get(EventContentFields.ROOM_TYPE)
         if room_type is not None:
             # If the old room was a space, copy over the rooms in the space.
