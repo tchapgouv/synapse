@@ -39,7 +39,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import UserID
+from synapse.types import JsonMapping, UserID
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -115,6 +115,10 @@ class UserDirectoryHandler(StateDeltasHandler):
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._hs = hs
+        self.federation_client = hs.get_federation_client()
+        self.federation_domain_whitelist = (
+            hs.config.federation.federation_domain_whitelist
+        )
 
         # The current position in the current_state_delta stream
         self.pos: int | None = None
@@ -181,6 +185,39 @@ class UserDirectoryHandler(StateDeltasHandler):
         results["results"] = non_spammy_users
 
         return results
+
+    async def get_federated_search_results(
+        self, user_id: str, search_term: str, limit: int
+    ) -> JsonMapping:
+        """Get search results from federated servers.
+        Args:
+            user_id: The user performing the search
+            search_term: The term to search for
+            limit: Maximum number of results to return
+        Returns:
+            Search results from federated servers
+        """
+
+        # Get the list of servers from federation
+        if not self.federation_domain_whitelist:
+            return {"limited": False, "results": []}
+        authorized_servers = set(self.federation_domain_whitelist.keys())
+        # Remove our own server
+        authorized_servers.discard(self._hs.hostname)
+        servers = list(authorized_servers)
+
+        # If no remote servers to query, return empty results
+        if not servers:
+            return {"limited": False, "results": []}
+
+        # Query federated servers
+        federated_results = (
+            await self.federation_client.search_user_directory_across_federation(
+                user_id, servers, search_term, limit
+            )
+        )
+
+        return federated_results
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""
