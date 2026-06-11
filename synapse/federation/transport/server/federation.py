@@ -48,7 +48,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import JsonDict, JsonMapping, get_domain_from_id
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -903,6 +903,59 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
+class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
+    """
+    Implements a federation API endpoint for searching a server's user directory.
+    POST /_matrix/federation/v3/user_directory/search
+    Request:
+    {
+        "requester": "@user:example.com",
+        "search_term": "search query",
+        "limit": 10
+    }
+    Response:
+    {
+        "limited": false,
+        "results": [
+            {
+                "user_id": "@user:example.com",
+                "display_name": "Display Name",
+                "avatar_url": "mxc://example.com/avatar",
+                "m.user_directory.visibility": "local"
+            }
+        ]
+    }
+    """
+
+    PATH = "/user_directory/search"
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4258"
+    RATELIMIT = True
+
+    async def on_POST(
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonMapping]:
+        requester = content.get("requester")
+        if requester is None or get_domain_from_id(requester) != origin:
+            raise SynapseError(400, "Missing or invalid requester", Codes.BAD_JSON)
+        search_term = content.get("search_term")
+        if not search_term or not isinstance(search_term, str):
+            raise SynapseError(400, "Missing or invalid search_term", Codes.BAD_JSON)
+
+        # Not triggering any search for less than 3 chars
+        if search_term and len(search_term) < 4:
+            return 200, {"limited": False, "results": []}
+
+        limit = content.get("limit", 10)
+        if not isinstance(limit, int):
+            raise SynapseError(400, "Invalid limit", Codes.BAD_JSON)
+
+        limit = max(min(limit, 50), 0)  # Clamp limit between 0 and 50
+
+        return await self.handler.on_user_directory_search_request(
+            requester, origin, search_term, limit
+        )
+
+
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
@@ -935,4 +988,5 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationUserDirectorySearchServlet,
 )

@@ -315,3 +315,12 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # MSC4258: Federated User Search
+        self.msc4258_enabled: bool = experimental.get("msc4258_enabled", False)
+        self.msc4258_federation_search_timeout: int = experimental.get(
+            "msc4258_federation_search_timeout", 2000
+        )
+        self.msc4258_federation_search_max_result: int = experimental.get(
+            "msc4258_federation_search_max_result", 20
+        )

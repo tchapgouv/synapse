@@ -55,6 +55,14 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         login.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        return config
+
     @parameterized.expand([(b"",), (b"foo",), (b'{"limit": Infinity}',)])
     def test_bad_request(self, query_content: bytes) -> None:
         """
@@ -92,6 +100,64 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+    def test_federation_user_directory_search_servlet(self) -> None:
+        """Test that the federation user directory search servlet works correctly."""
+        self.register_user("userlambda", "password")
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
+            content={
+                "requester": "@requester:other.example.com",
+                "search_term": "user",
+                "limit": 10,
+            },
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("limited", None), False)
+        results = channel.json_body.get("results", [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get("user_id"), "@userlambda:test")
+
+    def test_federation_user_directory_search_servlet_invalid_request(self) -> None:
+        """Test that the federation user directory search servlet rejects invalid requests."""
+        self.register_user("user", "password")
+
+        # Make a request with missing search_term
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
+            content={"limit": 10},
+        )
+
+        # Check that the response is an error
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+    def test_federation_user_directory_search_servlet_no_results(self) -> None:
+        """Test that the federation user directory search servlet works correctly."""
+        self.register_user("user", "password")
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
+            content={
+                "requester": "@requester:other.example.com",
+                "search_term": "nonexistent",
+                "limit": 10,
+            },
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("limited", None), False)
+        results = channel.json_body.get("results", [])
+        self.assertEqual(len(results), 0)
 
 
 class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):
