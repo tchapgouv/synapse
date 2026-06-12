@@ -316,3 +316,6 @@ class ExperimentalConfig(Config):
         self.msc4258_federation_search_timeout: int = experimental.get(
             "msc4258_federation_search_timeout", 2000
         )
+        self.msc4258_federation_search_max_result: int = experimental.get(
+            "msc4258_federation_search_max_result", 20
+        )
