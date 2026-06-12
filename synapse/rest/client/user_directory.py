@@ -53,6 +53,9 @@ class UserDirectorySearchRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_user_directory,
         )
         self.msc4258_enabled = self.hs.config.experimental.msc4258_enabled
+        self.msc4258_federation_search_max_result = (
+            self.hs.config.experimental.msc4258_federation_search_max_result
+        )
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
         """Searches for users in directory, including federated results
@@ -88,7 +91,7 @@ class UserDirectorySearchRestServlet(RestServlet):
         body = parse_json_object_from_request(request)
 
         limit = int(body.get("limit", 10))
-        limit = max(min(limit, 50), 0)
+        limit = max(min(limit, self.msc4258_federation_search_max_result), 0)
 
         try:
             search_term = body["search_term"]
