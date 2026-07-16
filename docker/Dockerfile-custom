@@ -138,7 +138,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     git+https://github.com/tchapgouv/synapse-email-account-validity.git@${EMAIL_ACCOUNT_VALIDITY_VERSION} \
     git+https://github.com/tchapgouv/synapse-room-access-rules.git@${ROOM_ACCESS_RULES_VERSION} \
     git+https://github.com/matrix-org/synapse-domain-rule-checker.git@${DOMAIN_RULE_CHECKER_VERSION} \
-    git+https://github.com/matrix-org/synapse-patch-push-rules.git@v${PATCH_PUSH_RULES_VERSION} \
+    git+https://github.com/matrix-org/synapse-patch-push-rules.git@${PATCH_PUSH_RULES_VERSION} \
     git+https://github.com/matrix-org/synapse-bind-sydent.git@${BIND_SYDENT_VERSION} \
     git+https://github.com/matrix-org/synapse-3pid-checker.git@${THREEPID_CHECKER_VERSION} \
     git+https://github.com/matrix-org/synapse-username-from-threepid.git@${USERNAME_FROM_THREEPID_VERSION} \
