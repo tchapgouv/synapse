@@ -1,89 +1,60 @@
 # GitHub actions workflow which builds and publishes the docker images.
 
-name: Build docker images
-
+name: Create and publish a Docker image
 on:
   push:
-    tags: ["v*"]
-    branches: [master, main, develop]
+    # branches: [develop_tchap] (uncomment before merge)
+    branches: [build_docker]
+    tags: ["*"]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-  id-token: write # needed for signing the images with GitHub OIDC Token
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   build:
     name: Build and push image for ${{ matrix.platform }}
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - platform: linux/amd64
-            runs_on: ubuntu-24.04
-            suffix: linux-amd64
-          - platform: linux/arm64
-            runs_on: ubuntu-24.04-arm
-            suffix: linux-arm64
+        platform:
+          - linux/amd64
+          # - linux/arm/v6
+          # - linux/arm/v7
+          # - linux/arm64
+
     steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@v3
 
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Extract version from pyproject.toml
-        # Note: explicitly requesting bash will mean bash is invoked with `-eo pipefail`, see
-        # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsshell
-        shell: bash
-        run: |
-          echo "SYNAPSE_VERSION=$(grep "^version" pyproject.toml | sed -E 's/version\s*=\s*["]([^"]*)["]/\1/')" >> $GITHUB_ENV
-
-      - name: Log in to DockerHub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - name: Login
+        uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Tailscale
-        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4.1.2
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
-          tags: tag:github-actions
-
-      - name: Compute vault jwt role name
-        id: vault-jwt-role
-        run: |
-           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
-
-      - name: Get team registry token
-        id: import-secrets
-        uses: hashicorp/vault-action@4c06c5ccf5c0761b6029f56cfb1dcf5565918a3b # v3.4.0
-        with:
-          url: https://vault.infra.ci.i.element.dev
-          role: ${{ steps.vault-jwt-role.outputs.role_name }}
-          path: service-management/github-actions
-          jwtGithubAudience: https://vault.infra.ci.i.element.dev
-          method: jwt
-          secrets: |
-             services/backend-repositories/secret/data/oci.element.io username | OCI_USERNAME ;
-             services/backend-repositories/secret/data/oci.element.io password | OCI_PASSWORD ;
-
-      - name: Login to Element OCI Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          registry: oci-push.vpn.infra.element.io
-          username: ${{ steps.import-secrets.outputs.OCI_USERNAME }}
-          password: ${{ steps.import-secrets.outputs.OCI_PASSWORD }}
 
       - name: Build and push by digest
         id: build
@@ -94,10 +65,8 @@ jobs:
             gitsha1=${{ github.sha }}
             org.opencontainers.image.version=${{ env.SYNAPSE_VERSION }}
           tags: |
-            docker.io/matrixdotorg/synapse
-            ghcr.io/element-hq/synapse
-            oci-push.vpn.infra.element.io/synapse
-          file: "docker/Dockerfile"
+            ghcr.io/tchapgouv/synapse
+          file: "docker/Dockerfile-custom"
           platforms: ${{ matrix.platform }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
@@ -116,106 +85,38 @@ jobs:
           retention-days: 1
 
   merge:
-    name: Push merged images to ${{ matrix.repository }}
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        repository:
-          - docker.io/matrixdotorg/synapse
-          - ghcr.io/element-hq/synapse
-          - oci-push.vpn.infra.element.io/synapse
-
-    needs:
-      - build
+    needs: [build]
     steps:
       - name: Download digests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/digests
+          path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
 
-      - name: Log in to DockerHub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        if: ${{ startsWith(matrix.repository, 'docker.io') }}
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        if: ${{ startsWith(matrix.repository, 'ghcr.io') }}
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
+          images: ${{ env.REGISTRY  }}/${{ env.IMAGE_NAME }}
+
+      - name: Login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tailscale
-        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4.1.2
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
-          tags: tag:github-actions
-
-      - name: Compute vault jwt role name
-        id: vault-jwt-role
-        run: |
-           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
-
-      - name: Get team registry token
-        id: import-secrets
-        uses: hashicorp/vault-action@4c06c5ccf5c0761b6029f56cfb1dcf5565918a3b # v3.4.0
-        with:
-          url: https://vault.infra.ci.i.element.dev
-          role: ${{ steps.vault-jwt-role.outputs.role_name }}
-          path: service-management/github-actions
-          jwtGithubAudience: https://vault.infra.ci.i.element.dev
-          method: jwt
-          secrets: |
-             services/backend-repositories/secret/data/oci.element.io username | OCI_USERNAME ;
-             services/backend-repositories/secret/data/oci.element.io password | OCI_PASSWORD ;
-
-      - name: Login to Element OCI Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          registry: oci-push.vpn.infra.element.io
-          username: ${{ steps.import-secrets.outputs.OCI_USERNAME }}
-          password: ${{ steps.import-secrets.outputs.OCI_PASSWORD }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
-
-      - name: Calculate docker image tag
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
-        with:
-          images: ${{ matrix.repository }}
-          flavor: |
-            latest=false
-          tags: |
-            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=pep440,pattern={{raw}}
-            type=sha
-
       - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests
-        env:
-          REPOSITORY: ${{ matrix.repository }}
+        working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "$REPOSITORY@sha256:%s " *)
+          $(printf '${{ env.REGISTRY  }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
-      - name: Sign each manifest
-        env:
-          REPOSITORY: ${{ matrix.repository }}
+      - name: Inspect image
         run: |
-          DIGESTS=""
-          for TAG in $(echo "$DOCKER_METADATA_OUTPUT_JSON" | jq -r '.tags[]'); do
-            DIGEST="$(docker buildx imagetools inspect $TAG --format '{{json .Manifest}}' | jq -r '.digest')"
-            DIGESTS="$DIGESTS $REPOSITORY@$DIGEST"
-          done
-          cosign sign --yes $DIGESTS
+          docker buildx imagetools inspect ${{ env.REGISTRY  }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
