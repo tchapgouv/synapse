@@ -3,8 +3,7 @@
 name: Create and publish a Docker image
 on:
   push:
-    # branches: [develop_tchap] (uncomment before merge)
-    branches: [build_docker]
+    branches: [develop_tchap]
     tags: ["*"]
   workflow_dispatch:
 
