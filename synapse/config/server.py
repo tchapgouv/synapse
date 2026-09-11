@@ -176,7 +176,7 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "10"
+DEFAULT_ROOM_VERSION = "11"
 
 # Defaults for the presence state machine timers, in milliseconds. Overridden
 # by the corresponding options in the `presence` config section.
@@ -584,6 +584,12 @@ class ServerConfig(Config):
                 " 'allow_public_rooms_without_auth' and/or"
                 " 'allow_public_rooms_over_federation' is set."
             )
+
+        # Whether to support MSC4429 and MSC4262 Profile updates down sync
+        self.include_profile_updates_in_sync = config.get(
+            "include_profile_updates_in_sync",
+            False,
+        )
 
         # Check if the legacy "restrict_public_rooms_to_local_users" flag is set. This
         # flag is now obsolete but we need to check it for backward-compatibility.
