@@ -98,8 +98,13 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
-        # Not triggering any search for less than 3 chars if MSC4258 is enabled
-        if self.msc4258_enabled and search_term and len(search_term) < 4:
+        # Not triggering any search for missing/invalid term
+        # or for less than 3 chars if MSC4258 is enabled
+        if self.msc4258_enabled and (
+            not search_term
+            or not isinstance(search_term, str)
+            or (search_term and len(search_term) < 4)
+        ):
             return 200, {"limited": False, "results": []}
 
         # Get local results first
