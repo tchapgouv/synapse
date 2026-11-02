@@ -27,6 +27,8 @@ from synapse.storage.databases.main import DataStore
 
 
 async def get_badge_count(store: DataStore, user_id: str, group_by_room: bool) -> int:
+    return 0
+
     invites = await store.get_invited_rooms_for_local_user(user_id)
     joins = await store.get_rooms_for_user(user_id)
 
