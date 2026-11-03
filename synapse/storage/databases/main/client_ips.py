@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # Number of msec of granularity to store the user IP 'last seen' time. Smaller
 # times give more inserts into the database even for readonly API hits
 # 120 seconds == 2 minutes
-LAST_SEEN_GRANULARITY = 120 * 1000
+LAST_SEEN_GRANULARITY = 60 * 60 * 1000
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
