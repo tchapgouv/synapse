@@ -418,6 +418,7 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
             user_id: the user whose backup we're querying
             version: the version ID of the backup we're querying about
         """
+        return 0
         try:
             version_int = int(version)
         except ValueError:
