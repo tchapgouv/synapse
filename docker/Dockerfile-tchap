@@ -119,33 +119,30 @@ RUN \
 # We use 'uv pip install' here to ensure compatibility with the prefix setup
 # We use --no-deps because Synapse's main deps are already satisfied
 
-ARG FREEZE_ROOM_VERSION=main
 ARG EMAIL_ACCOUNT_VALIDITY_VERSION=main
 ARG ROOM_ACCESS_RULES_VERSION=main
 ARG DOMAIN_RULE_CHECKER_VERSION=main
 ARG PATCH_PUSH_RULES_VERSION=main
 ARG BIND_SYDENT_VERSION=main
-ARG THREEPID_CHECKER_VERSION=main
-ARG USERNAME_FROM_THREEPID_VERSION=main
-ARG DISPLAYNAME_FROM_EMAIL_VERSION=main
 ARG RED_LIST_VERSION=main
 ARG MANAGE_LAST_ADMIN_VERSION=main
-ARG SSO_PROCONNECT_VERSION=main
+
+#not used anymore 
+# ARG FREEZE_ROOM_VERSION=main
+# ARG THREEPID_CHECKER_VERSION=main
+# ARG USERNAME_FROM_THREEPID_VERSION=main 
+# ARG DISPLAYNAME_FROM_EMAIL_VERSION=main  
+# ARG SSO_PROCONNECT_VERSION=main 
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --prefix="/install" --no-deps \
-    git+https://github.com/matrix-org/synapse-freeze-room.git@${FREEZE_ROOM_VERSION} \
     git+https://github.com/tchapgouv/synapse-email-account-validity.git@${EMAIL_ACCOUNT_VALIDITY_VERSION} \
     git+https://github.com/tchapgouv/synapse-room-access-rules.git@${ROOM_ACCESS_RULES_VERSION} \
     git+https://github.com/matrix-org/synapse-domain-rule-checker.git@${DOMAIN_RULE_CHECKER_VERSION} \
     git+https://github.com/matrix-org/synapse-patch-push-rules.git@${PATCH_PUSH_RULES_VERSION} \
-    git+https://github.com/matrix-org/synapse-bind-sydent.git@${BIND_SYDENT_VERSION} \
-    git+https://github.com/matrix-org/synapse-3pid-checker.git@${THREEPID_CHECKER_VERSION} \
-    git+https://github.com/matrix-org/synapse-username-from-threepid.git@${USERNAME_FROM_THREEPID_VERSION} \
-    git+https://github.com/element-hq/tchap-displayname-from-email.git@${DISPLAYNAME_FROM_EMAIL_VERSION} \
+    git+https://github.com/matrix-org/synapse-bind-sydent.git@${BIND_SYDENT_VERSION} \    
     git+https://github.com/tchapgouv/tchap-red-list.git@${RED_LIST_VERSION} \
     git+https://github.com/tchapgouv/synapse-manage-last-admin.git@${MANAGE_LAST_ADMIN_VERSION} \
-    git+https://github.com/tchapgouv/synapse-sso-proconnect.git@${SSO_PROCONNECT_VERSION}
 # --- TCHAP CUSTOM MODULES END ---
 
 ###
